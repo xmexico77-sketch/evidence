@@ -74,6 +74,12 @@ CHECKS = [
         "heavy": False,
         "covers": "交付",
     },
+    {
+        "name": "论文框架生成（引用核实/伪造剔除/降级）",
+        "script": "verify_framework.py",
+        "heavy": True,
+        "covers": "模块六",
+    },
 ]
 
 

@@ -141,6 +141,24 @@ FIGURE_CAPTION = Prompt(
     user="图型：{kind}\n横轴：{x}\n序列：{series}\n统计量：\n{stats}\n",
 )
 
+# ---------------------------------------------------------------- 章节草稿
+SECTION_DRAFT = Prompt(
+    name="section_draft",
+    version="1.0.0",
+    system=(
+        "你在为一个研究设想撰写论文的某一节草稿。只能使用【证据】中的内容。\n"
+        "规则：\n"
+        "1. 每个论断后用证据编号标注，格式 [C1]；不得使用不存在的编号；\n"
+        "2. 不得编造文献、数据、实验设置或结论；证据没有的内容就写'（此处需作者补充）'；\n"
+        "3. 学术英文，简洁，不使用营销式表达；\n"
+        "4. 只输出该节正文，不要标题、不要解释。"
+    ),
+    user=(
+        "【研究设想】{idea}\n\n【本节】{heading}——{purpose}\n\n"
+        "【证据】\n{evidence}\n"
+    ),
+)
+
 ALL_PROMPTS = {
     p.name: p
     for p in (
@@ -152,5 +170,6 @@ ALL_PROMPTS = {
         FUTURE_JUDGE,
         AREA_REVIEW,
         FIGURE_CAPTION,
+        SECTION_DRAFT,
     )
 }

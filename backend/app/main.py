@@ -55,6 +55,7 @@ from .llm.prompts import TRANSLATE_PARAGRAPH
 from .parsing import parse_pdf, summary
 from .rag import GroundedAnswerer
 from .writing import build_chart
+from .writing.framework import build_framework, to_mermaid
 
 app = FastAPI(title="证源 Evidence API", version="0.1.0")
 app.add_middleware(
@@ -463,6 +464,28 @@ def area_reviews(refresh: bool = False) -> dict:
         json.dumps({"key": key, "payload": payload}, ensure_ascii=False), encoding="utf-8"
     )
     return payload
+
+
+class WriteRequest(BaseModel):
+    idea: str = Field(min_length=4, max_length=400)
+    use_llm: bool = True
+
+
+@app.post("/api/write")
+async def write_framework(req: WriteRequest) -> dict:
+    """Idea → 论文框架（章节 + 真实可核实引用 + 拓扑图）。"""
+    state = get_state()
+    retriever = state["retriever"]
+    llm = state["llm"] if (req.use_llm and has_key()) else None
+
+    def _run():
+        fw = build_framework(req.idea, state["store"], retriever, llm=llm)
+        return {**fw.to_dict(), "mermaid": to_mermaid(fw), "markdown": fw.to_markdown()}
+
+    try:
+        return await run_in_threadpool(_run)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"框架生成失败: {exc}") from exc
 
 
 @app.get("/api/papers/{paper_id}/paragraphs")

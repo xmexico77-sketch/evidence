@@ -60,6 +60,9 @@ export default function Workbench() {
           <Link href="/graph" className="pill">
             引用图谱
           </Link>
+          <Link href="/write" className="pill">
+            论文框架
+          </Link>
         </div>
         <div>
           {health ? (
