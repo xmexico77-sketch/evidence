@@ -118,6 +118,17 @@ pwsh -File scripts/start.ps1
 > 上线前请修改 `EVIDENCE_USERS` 与 `EVIDENCE_SECRET`，不要把示例密码用于公网。
 > 本地开发可设 `AUTH_ENABLED=0` 免登录。
 
+### 方式三：部署到公网
+
+见 [部署手册](docs/部署手册.md)：三条路线（云主机 / Cloudflare Tunnel / 无 Docker 直跑）、
+域名与 HTTPS、评审账号配置、部署后自检与故障排查表。
+
+部署完成后**务必**跑一次自检，全绿再交地址：
+
+```bash
+python scripts/check_deploy.py https://你的域名 --user reviewer --password 评审密码
+```
+
 ---
 
 ## 环境变量
@@ -157,6 +168,9 @@ pwsh -File scripts/start.ps1
 | 模块六 | 数据可视化（选型/分轴/图注/可复现脚本） | 通过 |
 | 模块六 | 论文框架生成（引用核实/伪造剔除/降级） | 通过 |
 | 模块四 | 论文发现（去重/可复现性加权/反馈/BibTeX） | 通过 |
+| 模块一 | 版式泛化（5 篇未见论文） | 通过 |
+| 模块一 | 长文档压测（507 页 / 内存 / 索引成本） | 通过 |
+| 交付 | 前端冒烟（页面可达/导航一致/无残留） | 通过 |
 
 ---
 
