@@ -9,12 +9,17 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from ..schema import Block, Paper
 
 MAX_CHUNK_CHARS = 900
 MIN_CHUNK_CHARS = 120
+# 单个文本块自身超长时必须切开。实测 507 页长文档里出现过 5173 字的单块，
+# 这种块会撑爆向量模型的 512 token 上下文，也让检索精度变差。
+HARD_SPLIT_CHARS = 1200
+SENT_SPLIT = re.compile(r"(?<=[.!?。！？])\s+")
 # 参考文献不参与问答检索（它们是"被引对象"，不是知识本身）
 SKIP_SECTIONS = ("references", "bibliography", "参考文献")
 
@@ -61,11 +66,64 @@ def _union_bbox(blocks: list[Block]) -> list[float]:
     ]
 
 
+def _split_oversized(text: str, limit: int = MAX_CHUNK_CHARS) -> list[str]:
+    """把超长文本按句子切成若干段，每段不超过 limit。
+
+    只在句子边界切；单句本身超长（公式块、表格行）时按字符硬切，
+    保证不会有任何一块超过 HARD_SPLIT_CHARS 的两倍。
+    """
+    if len(text) <= limit:
+        return [text]
+    out: list[str] = []
+    buf = ""
+    for sentence in SENT_SPLIT.split(text):
+        s = sentence.strip()
+        if not s:
+            continue
+        if len(s) > limit:
+            # 单句过长：先冲掉缓冲，再硬切
+            if buf:
+                out.append(buf)
+                buf = ""
+            for i in range(0, len(s), limit):
+                out.append(s[i : i + limit])
+            continue
+        if len(buf) + len(s) + 1 > limit:
+            out.append(buf)
+            buf = s
+        else:
+            buf = f"{buf} {s}".strip() if buf else s
+    if buf:
+        out.append(buf)
+    return [p for p in out if p.strip()]
+
+
 def build_chunks(paper: Paper) -> list[Chunk]:
     chunks: list[Chunk] = []
     buf: list[Block] = []
     buf_chars = 0
     current_section = None
+
+    def emit(text: str, blocks: list[Block]) -> None:
+        """把一段文本落成块；超过上限的再按句子切，保证硬上限。"""
+        for piece in _split_oversized(text):
+            if len(piece) < 20:
+                continue
+            idx = len(chunks)
+            chunks.append(
+                Chunk(
+                    id=f"{paper.id}#c{idx:04d}",
+                    paper_id=paper.id,
+                    index=idx,
+                    text=piece,
+                    section_path=blocks[0].section_path,
+                    section_title=blocks[0].section_title,
+                    page_start=min(b.page for b in blocks),
+                    page_end=max(b.page for b in blocks),
+                    bbox=_union_bbox(blocks),
+                    block_ids=[b.id for b in blocks],
+                )
+            )
 
     def flush() -> None:
         nonlocal buf, buf_chars
@@ -73,12 +131,14 @@ def build_chunks(paper: Paper) -> list[Chunk]:
             return
         text = " ".join(b.text for b in buf).strip()
         # 过短的尾块不能丢——它往往是某节的核心结论句。
-        # 同节则并入上一块；不同节才单独成块。
-        if (
+        # 同节且合并后不超上限则并入上一块；否则单独成块。
+        can_merge = (
             len(text) < MIN_CHUNK_CHARS
             and chunks
             and chunks[-1].section_path == buf[0].section_path
-        ):
+            and len(chunks[-1].text) + len(text) <= MAX_CHUNK_CHARS
+        )
+        if can_merge:
             prev = chunks[-1]
             prev.text = f"{prev.text} {text}".strip()
             prev.page_end = max(prev.page_end, max(b.page for b in buf))
@@ -89,24 +149,8 @@ def build_chunks(paper: Paper) -> list[Chunk]:
                 max(prev.bbox[2], max(b.bbox.x1 for b in buf)),
                 max(prev.bbox[3], max(b.bbox.y1 for b in buf)),
             ]
-            buf = []
-            buf_chars = 0
-            return
-        idx = len(chunks)
-        chunks.append(
-            Chunk(
-                id=f"{paper.id}#c{idx:04d}",
-                paper_id=paper.id,
-                index=idx,
-                text=text,
-                section_path=buf[0].section_path,
-                section_title=buf[0].section_title,
-                page_start=min(b.page for b in buf),
-                page_end=max(b.page for b in buf),
-                bbox=_union_bbox(buf),
-                block_ids=[b.id for b in buf],
-            )
-        )
+        else:
+            emit(text, buf)
         buf = []
         buf_chars = 0
 
@@ -119,6 +163,12 @@ def build_chunks(paper: Paper) -> list[Chunk]:
         current_section = block.section_path
 
         if block.is_heading or _is_skipped(block) or not block.text.strip():
+            continue
+
+        # 单块自身超长：切开后各自成块，锚点沿用该块的页与 bbox
+        if len(block.text) > HARD_SPLIT_CHARS:
+            flush()
+            emit(block.text, [block])
             continue
 
         buf.append(block)

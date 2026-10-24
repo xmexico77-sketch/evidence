@@ -92,6 +92,12 @@ CHECKS = [
         "heavy": True,
         "covers": "模块一",
     },
+    {
+        "name": "长文档压测（507 页 / 内存 / 索引成本）",
+        "script": "test_longdoc.py",
+        "heavy": True,
+        "covers": "模块一",
+    },
 ]
 
 
