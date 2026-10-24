@@ -12,9 +12,13 @@ from ..schema import BBox, Block, Citation, Reference
 _REF_HEADING_RE = re.compile(r"^(?:\d+\.?\s*)?(references|bibliography|参考文献)$", re.I)
 _MARK_RE = re.compile(r"\[(\d{1,3})\]")
 _NUM_LEAD_RE = re.compile(r"^(\d{1,3})\.\s")
+# 行首标记：整行的开头才是新条目的信号。用行而不是用块，
+# 因为我们的块合并会把十几条参考文献并成一块（实测 T5 只解出 10 条）。
+_MARK_LINE = re.compile(r"^\s*\[(\d{1,3})\]\s*|^\s*(\d{1,3})\.\s+")
 _CITE_RE = re.compile(r"\[(\d{1,3}(?:\s*[,–-]\s*\d{1,3})*)\]")
 _ARXIV_RE = re.compile(r"arXiv:\s*(\d{4}\.\d{4,5})(v\d+)?", re.I)
 _DOI_RE = re.compile(r"\b(10\.\d{4,9}/[-._;()/:A-Za-z0-9]+)\b")
+_APPENDIX_RE = re.compile(r"(?i)^(appendix|a\.\s|acknowledg)")
 
 
 def find_reference_heading(blocks: list[Block]) -> int | None:
@@ -29,40 +33,128 @@ def find_reference_heading(blocks: list[Block]) -> int | None:
     return None
 
 
+_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+
+
+def _looks_like_citation(text: str) -> bool:
+    """过滤误切：附录里的编号步骤、公式编号等不是文献。
+
+    真实文献条目几乎必然满足其一：含四位年份、含 arXiv、含 et al、长度足够。
+    """
+    if len(text) < 45:
+        return False
+    return bool(
+        _YEAR_RE.search(text)
+        or "arxiv" in text.lower()
+        or "et al" in text.lower()
+        or "doi" in text.lower()
+    )
+
+
 def parse_references(blocks: list[Block], start: int) -> list[Reference]:
     """从参考文献标题之后抽取条目。
 
-    现实情况分两种：编号式（每条以 [1]/1. 开头）与无编号式（按字母序排列）。
-    切分必须保守——过切会把一条文献碎成三条，图谱直接失真。
+    三次踩坑后的结论：
+    1. **按行切，不按块切**——块合并会把十几条并成一块（T5 曾只解出 10 条）；
+    2. **遇到下一个一级标题必须停**——否则附录里的编号列表会被当成文献
+       （Adam 曾解出 323 条，实际 15 条）；
+    3. **条目要过"像文献"的校验**——否则公式编号、步骤列表都会进来。
     """
+    lines: list[tuple[int, object]] = []
+    for blk in blocks[start + 1 :]:
+        if blk.is_heading and _APPENDIX_RE.match(blk.text.strip()):
+            break
+        lines.extend((blk.page, ln) for ln in blk.lines)
+
+    bracket = [i for i, (_, ln) in enumerate(lines) if re.match(r"^\s*\[\d{1,3}\]", ln.text)]
+    dotted = [i for i, (_, ln) in enumerate(lines) if re.match(r"^\s*\d{1,3}\.\s+\S", ln.text)]
+
+    refs: list[Reference]
+    if len(bracket) >= 3:
+        refs = _parse_marked_lines(lines, bracket, bracket_style=True)
+    elif len(dotted) >= 3:
+        refs = _parse_marked_lines(lines, dotted, bracket_style=False)
+    else:
+        refs = _split_unmarked_lines(lines)
+
+    return [r for r in refs if _looks_like_citation(r.text)]
+
+
+def _parse_marked_lines(
+    lines: list[tuple[int, object]], marked: list[int], bracket_style: bool = True
+) -> list[Reference]:
+    """按"行首标记"切分；标记之间的行并入当前条目。"""
     refs: list[Reference] = []
     seen: dict[int, int] = {}
-    for blk in blocks[start + 1 :]:
-        text = blk.text.strip()
+    bounds = list(zip(marked, marked[1:] + [len(lines)], strict=False))
+    for start_i, end_i in bounds:
+        head_text = lines[start_i][1].text.strip()
+        m = (
+            re.match(r"^\s*\[(\d{1,3})\]", head_text)
+            if bracket_style
+            else re.match(r"^\s*(\d{1,3})\.\s+", head_text)
+        )
+        if not m:
+            continue
+        index = int(m.group(1))
+        parts = [head_text[m.end() :].strip()]
+        for j in range(start_i + 1, end_i):
+            parts.append(lines[j][1].text.strip())
+        body = re.sub(r"\s+", " ", " ".join(p for p in parts if p)).strip()
+        if not body:
+            continue
+        page = lines[start_i][0]
+        bbox = lines[start_i][1].bbox
+        if index in seen:
+            refs[seen[index]].text += " " + body
+            continue
+        seen[index] = len(refs)
+        refs.append(Reference(index=index, text=body, page=page, bbox=bbox))
+    return refs
+
+
+_AUTHOR_START = re.compile(
+    r"^(?:"
+    r"[A-Z][A-Za-zÀ-ÿ\-'’]+,\s"  # 姓, 名（Springer/ICML 常见）
+    r"|(?:[A-Z][A-Za-zÀ-ÿ\-'’]+\.?\s+){1,3}[A-Z][A-Za-zÀ-ÿ\-'’]+,(?:\s|$)"  # 名 姓,（ACL 常见）
+    r"|[A-Z]\.(?:\s?[A-Z]\.)*\s+[A-Z][a-z]+"  # J. Smith
+    r")"
+)
+_INITIAL_START = _AUTHOR_START
+
+
+def _split_unmarked_lines(lines: list[tuple[int, object]]) -> list[Reference]:
+    """作者-年份式文献表：以"姓氏," 或 "首字母. 姓" 判断新条目起点。
+
+    这类表没有编号，只能靠作者名模式切分。实测 Adam 的文献表就属于这种，
+    之前按块切会整段并成 1 条。
+    """
+    starts: list[int] = []
+    for i, (_page, ln) in enumerate(lines):
+        text = ln.text.strip()
         if not text:
             continue
-        if blk.is_heading and re.match(r"(?i)^(appendix|a\.|acknowledg)", text):
-            break
-        for marker, body in _split_entries(text):
-            if not body:
-                continue
-            if marker:
-                index = int(marker)
-                if index in seen:
-                    refs[seen[index]].text += " " + body
-                    continue
-                seen[index] = len(refs)
-                refs.append(Reference(index=index, text=body, page=blk.page, bbox=blk.bbox))
-            else:
-                # 无编号：上一段没以句号收尾 => 是续行
-                if refs and not refs[-1].text.rstrip().endswith("."):
-                    refs[-1].text += " " + body
-                else:
-                    refs.append(
-                        Reference(
-                            index=len(refs) + 1, text=body, page=blk.page, bbox=blk.bbox
-                        )
-                    )
+        if _AUTHOR_START.match(text):
+            starts.append(i)
+
+    if not starts:
+        return []
+
+    refs: list[Reference] = []
+    bounds = list(zip(starts, starts[1:] + [len(lines)], strict=False))
+    for start_i, end_i in bounds:
+        parts = [lines[j][1].text.strip() for j in range(start_i, end_i)]
+        body = re.sub(r"\s+", " ", " ".join(p for p in parts if p)).strip()
+        if not body:
+            continue
+        refs.append(
+            Reference(
+                index=len(refs) + 1,
+                text=body,
+                page=lines[start_i][0],
+                bbox=lines[start_i][1].bbox,
+            )
+        )
     return refs
 
 

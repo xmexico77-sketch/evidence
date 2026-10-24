@@ -44,6 +44,12 @@ CHECKS = [
         "heavy": True,
         "covers": "闭环",
     },
+    {
+        "name": "引用图谱（版本合并/基石榜/关键边/社区）",
+        "script": "verify_graph.py",
+        "heavy": False,
+        "covers": "模块五",
+    },
 ]
 
 

@@ -49,6 +49,14 @@ CREATE TABLE IF NOT EXISTS vectors (
     chunk_id TEXT PRIMARY KEY,
     vec      BLOB
 );
+
+CREATE TABLE IF NOT EXISTS refs (
+    paper_id  TEXT NOT NULL,
+    ref_index INTEGER,
+    text      TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_refs_paper ON refs(paper_id);
 """
 
 
@@ -99,10 +107,15 @@ class Store:
         )
         cur.execute("DELETE FROM chunks WHERE paper_id=?", (paper.id,))
         cur.execute("DELETE FROM vectors WHERE chunk_id LIKE ?", (f"{paper.id}#%",))
+        cur.execute("DELETE FROM refs WHERE paper_id=?", (paper.id,))
         cur.executemany(
             "INSERT INTO chunks (id,paper_id,idx,text,section_path,section_title,"
             "page_start,page_end,bbox,block_ids) VALUES (?,?,?,?,?,?,?,?,?,?)",
             [c.to_row() for c in chunks],
+        )
+        cur.executemany(
+            "INSERT INTO refs (paper_id,ref_index,text) VALUES (?,?,?)",
+            [(paper.id, r.index, r.text) for r in paper.references],
         )
         self.conn.commit()
 
@@ -163,6 +176,16 @@ class Store:
                     "bbox": [float(x) for x in (r[8] or "").split(",") if x],
                 }
             )
+        return out
+
+    def load_refs(self) -> dict[str, list[tuple[int, str]]]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT paper_id, ref_index, text FROM refs ORDER BY paper_id, ref_index"
+            ).fetchall()
+        out: dict[str, list[tuple[int, str]]] = {}
+        for paper_id, idx, text in rows:
+            out.setdefault(paper_id, []).append((idx, text))
         return out
 
     def load_vectors(self) -> tuple[list[str], np.ndarray]:

@@ -229,6 +229,9 @@ def _looks_like_heading_line(line: Line) -> bool:
         return False
     if text.endswith((".", "。", ",", ";", ":")):
         return False
+    # "2018. Contextual string embeddings…" 是参考文献条目，不是章节标题
+    if re.match(r"^(?:19|20)\d{2}\.\s", text):
+        return False
     if _NUMBERED_LINE.match(text) and len(text.split()) <= 12:
         return True
     return line.bold and len(text.split()) <= 8

@@ -13,27 +13,36 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "backend"))
 
 from app.indexing import HybridRetriever, Store, build_chunks, chunk_stats, format_hits  # noqa: E402
 from app.parsing import parse_pdf, summary  # noqa: E402
 
 
+def _resolve(pattern: str) -> list[Path]:
+    """相对路径一律按项目根解析，避免受调用方工作目录影响。"""
+    p = Path(pattern)
+    if "*" in pattern:
+        return sorted(ROOT.glob(pattern))
+    return [p if p.is_absolute() else ROOT / p]
+
+
 def cmd_build(paths: list[str]) -> int:
     store = Store()
     for raw in paths:
-        path = Path(raw)
-        print(f"[parse] {path.name}")
-        paper = parse_pdf(path)
-        stats = summary(paper)
-        chunks = build_chunks(paper)
-        cstats = chunk_stats(chunks)
-        store.upsert_paper(paper, chunks)
-        print(
-            f"  headings={stats['headings']} refs={stats['references']} "
-            f"chunks={cstats['count']} avg={cstats['avg_chars']}chars "
-            f"sections={cstats['sections']}"
-        )
+        for path in _resolve(raw):
+            print(f"[parse] {path.name}")
+            paper = parse_pdf(path)
+            stats = summary(paper)
+            chunks = build_chunks(paper)
+            cstats = chunk_stats(chunks)
+            store.upsert_paper(paper, chunks)
+            print(
+                f"  headings={stats['headings']} refs={stats['references']} "
+                f"chunks={cstats['count']} avg={cstats['avg_chars']}chars "
+                f"sections={cstats['sections']}"
+            )
 
     retriever = HybridRetriever(store)
     retriever.build_bm25()
