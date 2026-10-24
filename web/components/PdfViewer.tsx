@@ -1,0 +1,158 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
+
+export type HighlightBox = { page: number; bbox: number[] };
+
+type Props = {
+  paperId: string;
+  /** 需要高亮的框（来自问答引用的 anchor.boxes） */
+  highlights?: HighlightBox[];
+  /** 跳转目标页（1-based） */
+  focusPage?: number | null;
+  onPageChange?: (page: number) => void;
+};
+
+/** PDF 点坐标（PyMuPDF 用左上原点、y 向下）→ PDF 用户空间（左下原点、y 向上）。 */
+function toPdfSpace(bbox: number[], pageHeight: number): number[] {
+  const [x0, y0, x1, y1] = bbox;
+  return [x0, pageHeight - y1, x1, pageHeight - y0];
+}
+
+export default function PdfViewer({
+  paperId,
+  highlights = [],
+  focusPage = null,
+  onPageChange,
+}: Props) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const docRef = useRef<PDFDocumentProxy | null>(null);
+  const pageEls = useRef<Map<number, HTMLDivElement>>(new Map());
+  const rendered = useRef<Set<number>>(new Set());
+  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [total, setTotal] = useState(0);
+
+  // ---------- 渲染 ----------
+  const renderPage = useCallback(
+    async (pdf: PDFDocumentProxy, pageNo: number, host: HTMLDivElement) => {
+      if (rendered.current.has(pageNo)) return;
+      rendered.current.add(pageNo);
+      const page: PDFPageProxy = await pdf.getPage(pageNo);
+      const unscaled = page.getViewport({ scale: 1 });
+      const width = host.clientWidth || 720;
+      const scale = width / unscaled.width;
+      const viewport = page.getViewport({ scale });
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width = `${viewport.width}px`;
+      canvas.style.height = `${viewport.height}px`;
+      canvas.style.display = "block";
+      host.style.height = `${viewport.height}px`;
+      host.prepend(canvas);
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("无法获取 canvas 上下文");
+      await page.render({
+        canvasContext: ctx,
+        viewport,
+        transform: dpr === 1 ? undefined : [dpr, 0, 0, dpr, 0, 0],
+      }).promise;
+
+      // 高亮层
+      const boxes = highlights.filter((h) => h.page === pageNo);
+      for (const box of boxes) {
+        const rect = viewport.convertToViewportRectangle(
+          toPdfSpace(box.bbox, unscaled.height) as [number, number, number, number],
+        );
+        const el = document.createElement("div");
+        el.className = "hl";
+        el.style.left = `${Math.min(rect[0], rect[2])}px`;
+        el.style.top = `${Math.min(rect[1], rect[3])}px`;
+        el.style.width = `${Math.abs(rect[2] - rect[0])}px`;
+        el.style.height = `${Math.abs(rect[3] - rect[1])}px`;
+        host.appendChild(el);
+      }
+    },
+    [highlights],
+  );
+
+  // ---------- 加载文档 ----------
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setStatus("loading");
+      try {
+        const pdfjs = await import("pdfjs-dist");
+        pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
+        const pdf = await pdfjs.getDocument(`/api/papers/${paperId}/file`).promise;
+        if (cancelled) return;
+        docRef.current = pdf;
+        setTotal(pdf.numPages);
+        setStatus("ready");
+      } catch (e) {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : String(e));
+        setStatus("error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [paperId]);
+
+  // ---------- 首次渲染全部页 ----------
+  useEffect(() => {
+    if (status !== "ready" || !docRef.current) return;
+    const pdf = docRef.current;
+    (async () => {
+      for (let p = 1; p <= pdf.numPages; p += 1) {
+        const host = pageEls.current.get(p);
+        if (!host) continue;
+        await renderPage(pdf, p, host);
+      }
+    })();
+  }, [status, renderPage]);
+
+  // ---------- 跳转 ----------
+  useEffect(() => {
+    if (!focusPage) return;
+    const el = pageEls.current.get(focusPage);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    el.classList.add("flash");
+    const timer = window.setTimeout(() => el.classList.remove("flash"), 1200);
+    onPageChange?.(focusPage);
+    return () => window.clearTimeout(timer);
+  }, [focusPage, onPageChange]);
+
+  if (status === "error") {
+    return (
+      <div className="card" style={{ borderColor: "#4d2424", color: "var(--bad)" }}>
+        PDF 渲染失败：{error}
+      </div>
+    );
+  }
+
+  return (
+    <div className="pdf-scroll" ref={containerRef}>
+      {status === "loading" && <div className="empty">正在加载 PDF…</div>}
+      {Array.from({ length: total }, (_, i) => i + 1).map((p) => (
+        <div
+          key={p}
+          className="pdf-page"
+          ref={(el) => {
+            if (el) pageEls.current.set(p, el);
+            else pageEls.current.delete(p);
+          }}
+        >
+          <span className="pdf-page-no">{p}</span>
+        </div>
+      ))}
+    </div>
+  );
+}

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { AskResponse, Health, Paper } from "@/lib/types";
@@ -64,12 +65,17 @@ export default function Workbench() {
           <p className="section-title">文献库</p>
           {papers.length === 0 && <div className="empty">暂无文献</div>}
           {papers.map((p) => (
-            <div className="paper-row" key={p.id}>
+            <Link
+              className="paper-row"
+              key={p.id}
+              href={`/paper/${p.id}`}
+              style={{ color: "inherit" }}
+            >
               <span className="t">{p.title || p.id}</span>
               <span className="m">
                 {p.arxiv_id || p.id} · {p.pages}p · {p.chunks}块
               </span>
-            </div>
+            </Link>
           ))}
         </div>
 
@@ -163,6 +169,18 @@ export default function Workbench() {
                       <span className="faint">
                         高亮 {c.anchor.boxes?.length ?? 0} 段
                       </span>
+                      <Link
+                        href={{
+                          pathname: `/paper/${c.anchor.paper_id}`,
+                          query: {
+                            page: c.anchor.page,
+                            box: (c.anchor.boxes?.[0]?.bbox ?? c.anchor.bbox).join(","),
+                          },
+                        }}
+                        style={{ marginLeft: "auto", fontSize: 11.5 }}
+                      >
+                        在原文中查看 →
+                      </Link>
                     </div>
                     <div className="snippet">{c.snippet}…</div>
                   </div>

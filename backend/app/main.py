@@ -13,7 +13,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
@@ -129,6 +129,46 @@ async def upload_paper(file: UploadFile = File(...)) -> dict:
         return await run_in_threadpool(_ingest)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(500, f"解析失败: {exc}") from exc
+
+
+@app.get("/api/papers/{paper_id}/outline")
+def paper_outline(paper_id: str) -> dict:
+    """标题树：阅读器左侧导航。"""
+    store = get_state()["store"]
+    if store.get_paper(paper_id) is None:
+        raise HTTPException(404, "论文不存在")
+    return {"outline": store.load_outline(paper_id)}
+
+
+@app.get("/api/papers/{paper_id}/references")
+def paper_references(paper_id: str) -> dict:
+    store = get_state()["store"]
+    if store.get_paper(paper_id) is None:
+        raise HTTPException(404, "论文不存在")
+    return {"references": store.load_references(paper_id)}
+
+
+@app.get("/api/papers/{paper_id}/blocks")
+def paper_blocks(paper_id: str) -> dict:
+    """按页分组的段落 bbox，供前端画定位层。"""
+    store = get_state()["store"]
+    if store.get_paper(paper_id) is None:
+        raise HTTPException(404, "论文不存在")
+    pages = store.load_pages_blocks(paper_id)
+    return {"pages": {str(k): v for k, v in pages.items()}}
+
+
+@app.get("/api/papers/{paper_id}/file")
+def paper_file(paper_id: str) -> FileResponse:
+    """把原始 PDF 交给前端 PDF.js 渲染。"""
+    store = get_state()["store"]
+    meta = store.get_paper(paper_id)
+    if meta is None or not meta["filename"]:
+        raise HTTPException(404, "论文不存在")
+    path = PDF_DIR / Path(meta["filename"]).name
+    if not path.exists():
+        raise HTTPException(404, f"PDF 文件缺失: {path.name}")
+    return FileResponse(path, media_type="application/pdf", filename=path.name)
 
 
 @app.post("/api/search", response_model=list[SearchHit])

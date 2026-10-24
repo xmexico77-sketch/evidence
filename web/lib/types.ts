@@ -6,6 +6,16 @@ export type Health = {
   chunks: number;
 };
 
+export type OutlineItem = {
+  text: string;
+  level: number;
+  page: number;
+  bbox: number[];
+  number: string;
+  path: string;
+  block_id: string;
+};
+
 export type Paper = {
   id: string;
   title: string;

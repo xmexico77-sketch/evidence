@@ -68,6 +68,19 @@ CREATE TABLE IF NOT EXISTS blocks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_blocks_paper ON blocks(paper_id);
+
+CREATE TABLE IF NOT EXISTS headings (
+    paper_id TEXT NOT NULL,
+    block_id TEXT,
+    text     TEXT,
+    level    INTEGER,
+    page     INTEGER,
+    bbox     TEXT,
+    number   TEXT,
+    path     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_headings_paper ON headings(paper_id);
 """
 
 
@@ -143,6 +156,24 @@ class Store:
                 for b in paper.blocks
             ],
         )
+        cur.execute("DELETE FROM headings WHERE paper_id=?", (paper.id,))
+        cur.executemany(
+            "INSERT INTO headings (paper_id,block_id,text,level,page,bbox,number,path) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            [
+                (
+                    paper.id,
+                    h.block_id,
+                    h.text,
+                    h.level,
+                    h.page,
+                    ",".join(f"{v:.2f}" for v in h.bbox.to_list()),
+                    h.number,
+                    h.path,
+                )
+                for h in paper.headings
+            ],
+        )
         self.conn.commit()
 
     def save_vectors(self, chunk_ids: list[str], matrix: np.ndarray) -> None:
@@ -200,6 +231,70 @@ class Store:
                     "page_start": r[6],
                     "page_end": r[7],
                     "bbox": [float(x) for x in (r[8] or "").split(",") if x],
+                }
+            )
+        return out
+
+    def get_paper(self, paper_id: str) -> dict | None:
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT id,title,filename,page_count,arxiv_id,sha256 FROM papers WHERE id=?",
+                (paper_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "title": row[1],
+            "filename": row[2],
+            "pages": row[3],
+            "arxiv_id": row[4],
+            "sha256": row[5],
+        }
+
+    def load_outline(self, paper_id: str) -> list[dict]:
+        """标题树：阅读器左侧导航用。"""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT text,level,page,bbox,number,path,block_id FROM headings "
+                "WHERE paper_id=? ORDER BY block_id",
+                (paper_id,),
+            ).fetchall()
+        return [
+            {
+                "text": r[0],
+                "level": r[1],
+                "page": r[2],
+                "bbox": [float(x) for x in (r[3] or "").split(",") if x],
+                "number": r[4],
+                "path": r[5],
+                "block_id": r[6],
+            }
+            for r in rows
+        ]
+
+    def load_references(self, paper_id: str) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT ref_index,text FROM refs WHERE paper_id=? ORDER BY ref_index",
+                (paper_id,),
+            ).fetchall()
+        return [{"index": r[0], "text": r[1]} for r in rows]
+
+    def load_pages_blocks(self, paper_id: str) -> dict[int, list[dict]]:
+        """按页分组的文本块，阅读器用来做"原文定位"与段落点击。"""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id,page,bbox,section FROM blocks WHERE paper_id=? ORDER BY order_idx",
+                (paper_id,),
+            ).fetchall()
+        out: dict[int, list[dict]] = {}
+        for bid, page, bbox, section in rows:
+            out.setdefault(page, []).append(
+                {
+                    "id": bid,
+                    "bbox": [float(x) for x in (bbox or "").split(",") if x],
+                    "section": section,
                 }
             )
         return out
