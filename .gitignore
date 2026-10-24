@@ -29,3 +29,5 @@ data/figures/
 dist/
 build/
 *.mp4
+docs/preview/
+docs/checks.json
