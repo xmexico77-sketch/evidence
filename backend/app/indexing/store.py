@@ -57,6 +57,17 @@ CREATE TABLE IF NOT EXISTS refs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_refs_paper ON refs(paper_id);
+
+CREATE TABLE IF NOT EXISTS blocks (
+    id         TEXT PRIMARY KEY,
+    paper_id   TEXT NOT NULL,
+    page       INTEGER,
+    bbox       TEXT,
+    order_idx  INTEGER,
+    section    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_blocks_paper ON blocks(paper_id);
 """
 
 
@@ -116,6 +127,21 @@ class Store:
         cur.executemany(
             "INSERT INTO refs (paper_id,ref_index,text) VALUES (?,?,?)",
             [(paper.id, r.index, r.text) for r in paper.references],
+        )
+        cur.execute("DELETE FROM blocks WHERE paper_id=?", (paper.id,))
+        cur.executemany(
+            "INSERT INTO blocks (id,paper_id,page,bbox,order_idx,section) VALUES (?,?,?,?,?,?)",
+            [
+                (
+                    b.id,
+                    paper.id,
+                    b.page,
+                    ",".join(f"{v:.2f}" for v in b.bbox.to_list()),
+                    b.order,
+                    b.section_path,
+                )
+                for b in paper.blocks
+            ],
         )
         self.conn.commit()
 
@@ -187,6 +213,43 @@ class Store:
         for paper_id, idx, text in rows:
             out.setdefault(paper_id, []).append((idx, text))
         return out
+
+    def boxes_for_chunks(self, chunk_ids: list[str]) -> dict[str, list[dict]]:
+        """返回每个块内**逐段 bbox**。
+
+        chunk.bbox 是整块并集，跨页时会大到整页（实测出现过 72→722），
+        前端拿去做高亮毫无意义。真正能用于高亮的是块内每一段的 bbox。
+        """
+        if not chunk_ids:
+            return {}
+        marks = ",".join("?" * len(chunk_ids))
+        with self._lock:
+            rows = self.conn.execute(
+                f"SELECT id, block_ids FROM chunks WHERE id IN ({marks})", chunk_ids
+            ).fetchall()
+            wanted: dict[str, list[str]] = {}
+            all_ids: list[str] = []
+            for cid, block_ids in rows:
+                ids = [b for b in (block_ids or "").split("|") if b]
+                wanted[cid] = ids
+                all_ids.extend(ids)
+            if not all_ids:
+                return {}
+            marks2 = ",".join("?" * len(all_ids))
+            brows = self.conn.execute(
+                f"SELECT id, page, bbox FROM blocks WHERE id IN ({marks2})", all_ids
+            ).fetchall()
+        box_by_block = {
+            bid: {
+                "page": page,
+                "bbox": [float(x) for x in (bbox or "").split(",") if x],
+            }
+            for bid, page, bbox in brows
+        }
+        return {
+            cid: [box_by_block[b] for b in ids if b in box_by_block]
+            for cid, ids in wanted.items()
+        }
 
     def load_vectors(self) -> tuple[list[str], np.ndarray]:
         with self._lock:

@@ -168,11 +168,21 @@ class HybridRetriever:
                 }
             )
         hits.sort(key=lambda h: h["score"], reverse=True)
-        return hits[:top_k]
+        hits = hits[:top_k]
+        # 补上逐段 bbox，供前端在 PDF 上精确高亮
+        boxes = self.store.boxes_for_chunks([h["id"] for h in hits])
+        for hit in hits:
+            hit["boxes"] = boxes.get(hit["id"], [])
+            hit["anchor"] = make_anchor(hit)
+        return hits
 
 
 def make_anchor(chunk: dict) -> dict:
-    """人类可读 + 机器可跳转的双重锚点。"""
+    """人类可读 + 机器可跳转的双重锚点。
+
+    boxes 是该块内逐段的 bbox（页 + 坐标），用于在 PDF 上画精确高亮；
+    bbox 是整块并集，只适合"跳到这一页"这种粗定位。
+    """
     page = chunk["page_start"]
     section = chunk["section_title"] or "正文"
     return {
@@ -180,6 +190,7 @@ def make_anchor(chunk: dict) -> dict:
         "paper_id": chunk["paper_id"],
         "page": page,
         "bbox": chunk["bbox"],
+        "boxes": chunk.get("boxes", []),
         "chunk_id": chunk["id"],
     }
 

@@ -81,6 +81,8 @@ class AskResponse(BaseModel):
     repaired: bool
     invalid_markers: list[int]
     citations: list[dict]
+    # 前端用它显示置信度并做"低相关度"提示，漏掉会导致页面崩溃
+    confidence: float = 0.0
 
 
 @app.get("/api/health")

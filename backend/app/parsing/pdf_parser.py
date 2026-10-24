@@ -139,7 +139,8 @@ def parse_pdf(path: str | Path, paper_id: str | None = None) -> Paper:
         blocks = [b for b in blocks if not L.looks_like_running_head(b.text) or b.is_heading]
         for blk in blocks:
             blk.order = len(all_blocks)
-            blk.id = f"p{blk.page}_b{len(all_blocks):04d}"
+            # 块 id 必须全局唯一：只带页码和序号会在不同论文之间撞主键
+            blk.id = f"{paper.id}#b{len(all_blocks):05d}"
             all_blocks.append(blk)
             if pno == 0:
                 first_page_blocks.append(blk)
