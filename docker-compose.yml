@@ -1,0 +1,43 @@
+# 证源 Evidence · 一键起
+#
+#   docker compose up -d          # 构建并启动
+#   docker compose logs -f api    # 看日志
+#   docker compose down           # 停止
+#
+# 首次启动会下载约 640MB 的向量与重排模型，请确保网络可达 HuggingFace
+# （国内建议在 .env 里把 HF_ENDPOINT 设为 https://hf-mirror.com）。
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    image: evidence-api:latest
+    env_file:
+      - .env
+    environment:
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}
+    volumes:
+      - evidence-cache:/app/.cache
+      - evidence-data:/app/data
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    image: evidence-web:latest
+    environment:
+      API_BASE: http://api:8000
+      AUTH_ENABLED: ${AUTH_ENABLED:-1}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+volumes:
+  evidence-cache:
+  evidence-data:

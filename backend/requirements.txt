@@ -1,0 +1,38 @@
+# 证源 Evidence · 后端依赖（Python 3.12）
+#
+# 说明：
+# - fastembed 只需 onnxruntime，不需要 torch（省约 2.5GB）
+# - rapidocr-onnxruntime 自带中英文 OCR 模型，无需安装 tesseract
+# - 版本为开发环境实测通过的组合
+
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+sse-starlette==3.5.0
+pydantic==2.14.1
+python-dotenv==1.2.4
+orjson==3.13.0
+PyYAML==6.0.3
+httpx==0.28.1
+
+# PDF 解析与 OCR
+pymupdf==2.0
+pymupdf4llm==2.0
+rapidocr-onnxruntime==1.4.4
+
+# 检索与向量
+fastembed==0.9.0
+onnxruntime==1.31.0
+rank-bm25==0.2.2
+jieba==0.42.1
+numpy==2.3.5
+
+# 图算法与可视化
+networkx==3.7
+scipy==1.18.1
+matplotlib==3.11.2
+pandas==3.0.1
+
+# 其他
+aiosqlite==0.22.1
+tenacity==9.2.1

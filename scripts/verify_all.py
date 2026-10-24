@@ -68,6 +68,12 @@ CHECKS = [
         "heavy": True,
         "covers": "模块四",
     },
+    {
+        "name": "认证与评审账号（登录/Cookie/Bearer/篡改）",
+        "script": "test_auth.py",
+        "heavy": False,
+        "covers": "交付",
+    },
 ]
 
 

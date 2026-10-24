@@ -12,12 +12,24 @@ import json
 import shutil
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
+
+from .auth import (
+    COOKIE_NAME,
+    TOKEN_TTL,
+    auth_enabled,
+    check_password,
+    create_token,
+    is_public,
+    token_from_request,
+    users,
+    verify_token,
+)
 
 from .config import DATA_DIR, INDEX_DIR, PDF_DIR
 from .discovery import fetch as fetch_arxiv
@@ -109,6 +121,63 @@ class AskResponse(BaseModel):
     citations: list[dict]
     # 前端用它显示置信度并做"低相关度"提示，漏掉会导致页面崩溃
     confidence: float = 0.0
+
+
+@app.middleware("http")
+async def auth_guard(request: Request, call_next):
+    """统一鉴权：AUTH_ENABLED=0 时完全放行，便于本地开发与离线演示。"""
+    if not auth_enabled() or is_public(request.url.path):
+        return await call_next(request)
+
+    token = token_from_request(dict(request.headers), request.cookies)
+    user = verify_token(token) if token else None
+    if user is None:
+        return JSONResponse({"detail": "未登录或会话已过期"}, status_code=401)
+
+    response = await call_next(request)
+    response.headers["X-Evidence-User"] = user
+    return response
+
+
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=128)
+
+
+@app.post("/api/login")
+def login(req: LoginRequest) -> JSONResponse:
+    if not check_password(req.username, req.password):
+        raise HTTPException(401, "账号或密码错误")
+    token = create_token(req.username)
+    payload = JSONResponse({"ok": True, "user": req.username, "token": token})
+    payload.set_cookie(
+        COOKIE_NAME,
+        token,
+        max_age=TOKEN_TTL,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return payload
+
+
+@app.post("/api/logout")
+def logout() -> JSONResponse:
+    payload = JSONResponse({"ok": True})
+    payload.delete_cookie(COOKIE_NAME, path="/")
+    return payload
+
+
+@app.get("/api/me")
+def me(request: Request) -> dict:
+    if not auth_enabled():
+        return {"user": "anonymous", "auth_enabled": False}
+    token = token_from_request(dict(request.headers), request.cookies)
+    return {
+        "user": verify_token(token) if token else None,
+        "auth_enabled": True,
+        "users": sorted(users()),
+    }
 
 
 @app.get("/api/health")
