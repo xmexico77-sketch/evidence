@@ -10,12 +10,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "cytoscape": "3.30.4",
     "next": "15.5.4",
     "pdfjs-dist": "4.10.38",
     "react": "19.1.0",
     "react-dom": "19.1.0"
   },
   "devDependencies": {
+    "@types/cytoscape": "3.21.9",
     "@types/node": "22.10.2",
     "@types/react": "19.1.8",
     "@types/react-dom": "19.1.6",

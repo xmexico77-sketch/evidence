@@ -55,7 +55,10 @@ export default function Workbench() {
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <Link href="/discover" className="pill">
-            论文发现 →
+            论文发现
+          </Link>
+          <Link href="/graph" className="pill">
+            引用图谱
           </Link>
         </div>
         <div>

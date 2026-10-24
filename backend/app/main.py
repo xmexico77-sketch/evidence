@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -18,10 +19,24 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .config import DATA_DIR, PDF_DIR
+from .config import DATA_DIR, INDEX_DIR, PDF_DIR
 from .discovery import fetch as fetch_arxiv
 from .discovery.recommend import ingest as ingest_discovery
 from .discovery.recommend import recommend
+from .graph import (
+    build_graph,
+    compute_metrics,
+    rank_derivative,
+    rank_foundational,
+    to_cytoscape,
+)
+from .graph.future import (
+    assess_items,
+    cluster_items,
+    extract_future_work,
+    summarize_order,
+)
+from .graph.review import build_area_reviews
 from .indexing import HybridRetriever, Store, build_chunks
 from .llm import DeepSeekClient, ExtractiveLLM, Message, has_key
 from .llm.prompts import TRANSLATE_PARAGRAPH
@@ -277,6 +292,108 @@ async def discover_ingest(req: IngestRequest) -> dict:
         raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, f"下钻失败: {exc}") from exc
+
+
+@app.get("/api/graph")
+def citation_graph() -> dict:
+    """局域引用图谱：节点/边 + 基石榜 + 边缘衍生。"""
+    store = get_state()["store"]
+    g, works = build_graph(store)
+    works = compute_metrics(g, works)
+    payload = to_cytoscape(works, g)
+
+    def node_row(w) -> dict:  # noqa: ANN001
+        return {
+            "key": w.key,
+            "title": w.title,
+            "year": w.year,
+            "pagerank": round(w.pagerank, 5),
+            "sustained": w.sustained,
+            "foundational": round(w.foundational, 5),
+            "betweenness": round(w.betweenness, 5),
+            "community": w.community,
+            "members": w.members,
+        }
+
+    payload["foundational"] = [node_row(w) for w in rank_foundational(works, 6)]
+    payload["derivative"] = [node_row(w) for w in rank_derivative(works, 5)]
+    payload["communities"] = sorted({w.community for w in works.values() if w.community >= 0})
+    return payload
+
+
+@app.get("/api/graph/review")
+def area_reviews(refresh: bool = False) -> dict:
+    """自动综述 + Idea 考古。
+
+    这个计算要跑几十秒（37 条 Future Work 各做一次检索+重排），
+    所以结果按"库指纹"落盘缓存，只有库变了或显式 refresh 才重算。
+    """
+    store = get_state()["store"]
+    fingerprint = json.dumps(
+        {
+            "papers": len(store.list_papers()),
+            "chunks": len(store.load_chunks()),
+        },
+        sort_keys=True,
+    )
+    import hashlib
+
+    key = hashlib.sha1(fingerprint.encode()).hexdigest()[:12]
+    cache_path = INDEX_DIR / "review_cache.json"
+    if not refresh and cache_path.exists():
+        try:
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
+            if cached.get("key") == key:
+                return cached["payload"]
+        except Exception:  # noqa: BLE001 —— 缓存损坏就当没有
+            pass
+
+    g, works = build_graph(store)
+    works = compute_metrics(g, works)
+    reviews = build_area_reviews(works, store, llm=None)
+
+    year_by_paper: dict[str, int] = {}
+    for w in works.values():
+        for pid in w.members:
+            year_by_paper[pid] = w.year
+
+    retriever = get_state()["retriever"]
+    items = extract_future_work(store, year_by_paper)
+    cluster_items(items)
+    assess_items(items, retriever, year_by_paper, llm=None)
+    open_items = summarize_order(items, 6)
+
+    payload = {
+        "reviews": [
+            {
+                "community": r.community,
+                "theme": r.theme,
+                "year_range": r.year_range,
+                "members": r.members,
+                "summary": r.summary,
+                "method": r.method,
+            }
+            for r in reviews
+        ],
+        "open_ideas": [
+            {
+                "id": it.id,
+                "paper_id": it.paper_id,
+                "year": it.year,
+                "page": it.page,
+                "text": it.text,
+                "status": it.status,
+                "score": it.score,
+                "mentions": sum(1 for x in items if x.cluster == it.cluster),
+            }
+            for it in open_items
+        ],
+        "total_ideas": len(items),
+    }
+    cache_path.write_text(
+        json.dumps({"key": key, "payload": payload}, ensure_ascii=False), encoding="utf-8"
+    )
+    return payload
 
 
 @app.get("/api/papers/{paper_id}/paragraphs")

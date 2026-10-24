@@ -6,6 +6,74 @@ export type Health = {
   chunks: number;
 };
 
+export type GraphNode = {
+  data: {
+    id: string;
+    label: string;
+    year: number;
+    pagerank: number;
+    betweenness: number;
+    sustained: number;
+    foundational: number;
+    community: number;
+    size: number;
+    is_foundational: boolean;
+  };
+};
+
+export type GraphEdge = {
+  data: { id: string; source: string; target: string; weight: number };
+};
+
+export type GraphPayload = {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  stats: {
+    nodes: number;
+    edges: number;
+    matched_refs: number;
+    total_refs: number;
+    density: number;
+  };
+  foundational: GraphStat[];
+  derivative: GraphStat[];
+  communities: number[];
+};
+
+export type GraphStat = {
+  key: string;
+  title: string;
+  year: number;
+  pagerank: number;
+  sustained: number;
+  foundational: number;
+  betweenness: number;
+  community: number;
+  members: string[];
+};
+
+export type ReviewPayload = {
+  reviews: {
+    community: number;
+    theme: string;
+    year_range: string;
+    members: string[];
+    summary: string;
+    method: string;
+  }[];
+  open_ideas: {
+    id: string;
+    paper_id: string;
+    year: number;
+    page: number;
+    text: string;
+    status: string;
+    score: number;
+    mentions: number;
+  }[];
+  total_ideas: number;
+};
+
 export type Discovery = {
   id: string;
   title: string;
