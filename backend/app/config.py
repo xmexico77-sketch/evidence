@@ -35,4 +35,20 @@ def bootstrap_env() -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
+def load_env_files() -> None:
+    """按约定加载 .env.local / .env（不覆盖已有环境变量）。
+
+    密钥只经环境变量进入进程；仓库里只有 .env.example，绝不落库。
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:  # pragma: no cover
+        return
+    for name in (".env.local", ".env"):
+        path = PROJECT_ROOT / name
+        if path.exists():
+            load_dotenv(path, override=False)
+
+
 bootstrap_env()
+load_env_files()

@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import PdfViewer from "@/components/PdfViewer";
-import type { OutlineItem } from "@/lib/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ParaPane from "@/components/ParaPane";
+import PdfViewer, { type ScrollProgress } from "@/components/PdfViewer";
+import type { OutlineItem, Paragraph } from "@/lib/types";
+
+const SYNC_LOCK_MS = 700;
 
 export default function Reader({
   paperId,
@@ -15,25 +18,114 @@ export default function Reader({
   initialBox?: number[];
 }) {
   const [outline, setOutline] = useState<OutlineItem[]>([]);
+  const [paragraphs, setParagraphs] = useState<Paragraph[]>([]);
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [translateEnabled, setTranslateEnabled] = useState(false);
+  const [pending, setPending] = useState(0);
+
   const [focusPage, setFocusPage] = useState<number | null>(initialPage ?? null);
   const [current, setCurrent] = useState(initialPage ?? 1);
+  const [pdfTarget, setPdfTarget] = useState<ScrollProgress | null>(null);
+  const [paraTarget, setParaTarget] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const highlights =
-    initialPage && initialBox ? [{ page: initialPage, bbox: initialBox }] : [];
+  // 双向联动锁：避免 A 驱动 B、B 又回报 A 的死循环
+  const lock = useRef<{ dir: "pdf" | "para"; until: number }>({ dir: "para", until: 0 });
+
+  const byPage = useMemo(() => {
+    const m = new Map<number, Paragraph[]>();
+    for (const p of paragraphs) {
+      const list = m.get(p.page) ?? [];
+      list.push(p);
+      m.set(p.page, list);
+    }
+    return m;
+  }, [paragraphs]);
+
+  const paraById = useMemo(
+    () => new Map(paragraphs.map((p) => [p.id, p])),
+    [paragraphs],
+  );
 
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`/api/papers/${paperId}/outline`, { cache: "no-store" });
-        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-        const data = (await res.json()) as { outline: OutlineItem[] };
-        setOutline(data.outline);
+        const [o, p] = await Promise.all([
+          fetch(`/api/papers/${paperId}/outline`, { cache: "no-store" }),
+          fetch(`/api/papers/${paperId}/paragraphs`, { cache: "no-store" }),
+        ]);
+        if (!o.ok) throw new Error(`outline ${o.status}`);
+        if (!p.ok) throw new Error(`paragraphs ${p.status}`);
+        setOutline(((await o.json()) as { outline: OutlineItem[] }).outline);
+        setParagraphs(((await p.json()) as { paragraphs: Paragraph[] }).paragraphs);
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
       }
     })();
   }, [paperId]);
+
+  // PDF 滚动 → 驱动段落栏
+  const onPdfProgress = useCallback(
+    ({ page, ratio }: ScrollProgress) => {
+      const now = Date.now();
+      if (lock.current.dir === "para" && now < lock.current.until) return;
+      const list = byPage.get(page);
+      setCurrent(page);
+      if (!list || list.length === 0) return;
+      const idx = Math.min(list.length - 1, Math.max(0, Math.floor(ratio * list.length)));
+      lock.current = { dir: "pdf", until: now + SYNC_LOCK_MS };
+      setParaTarget(list[idx].id);
+    },
+    [byPage],
+  );
+
+  // 段落栏滚动 → 驱动 PDF
+  const onParaProgress = useCallback(
+    (id: string) => {
+      const now = Date.now();
+      if (lock.current.dir === "pdf" && now < lock.current.until) return;
+      const para = paraById.get(id);
+      if (!para) return;
+      const list = byPage.get(para.page) ?? [];
+      const idx = Math.max(0, list.findIndex((x) => x.id === id));
+      const ratio = list.length ? idx / list.length : 0;
+      lock.current = { dir: "para", until: now + SYNC_LOCK_MS };
+      setPdfTarget({ page: para.page, ratio });
+      setCurrent(para.page);
+    },
+    [byPage, paraById],
+  );
+
+  const translateVisible = useCallback(async () => {
+    const list = byPage.get(current) ?? [];
+    if (list.length === 0) return;
+    try {
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paper_id: paperId,
+          lang: "zh",
+          block_ids: list.map((p) => p.id),
+        }),
+      });
+      const data = (await res.json()) as {
+        enabled: boolean;
+        translations: Record<string, string>;
+        pending?: number;
+      };
+      setTranslateEnabled(data.enabled);
+      if (data.enabled) {
+        setTranslations((prev) => ({ ...prev, ...data.translations }));
+        setPending(data.pending ?? 0);
+      }
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }, [byPage, current, paperId]);
+
+  const highlights =
+    initialPage && initialBox ? [{ page: initialPage, bbox: initialBox }] : [];
 
   return (
     <div className="shell reader-shell">
@@ -47,16 +139,20 @@ export default function Reader({
         </Link>
         <div>
           <p className="section-title">
-            标题树 {current > 0 && <span className="faint">· 当前 p{current}</span>}
+            标题树 <span className="faint">· 当前 p{current}</span>
           </p>
-          {err && <div className="empty">大纲加载失败：{err}</div>}
+          {err && <div className="empty">加载失败：{err}</div>}
           {outline.length === 0 && !err && <div className="empty">暂无大纲</div>}
           <div className="outline">
             {outline.map((h, i) => (
               <button
                 key={`${h.block_id}-${i}`}
                 className={`outline-item l${h.level}`}
-                onClick={() => setFocusPage(h.page)}
+                onClick={() => {
+                  setFocusPage(h.page);
+                  setParaTarget(null);
+                  setPdfTarget({ page: h.page, ratio: 0 });
+                }}
                 title={`p${h.page}`}
               >
                 {h.number ? <span className="num">{h.number}</span> : null}
@@ -70,16 +166,28 @@ export default function Reader({
       <main className="reader-main">
         <div className="reader-head">
           <h1>{paperId}</h1>
-          <span className="pill mono">
-            {outline.length} 个标题 · 当前 p{current}
-          </span>
+          <span className="pill mono">{outline.length} 个标题 · 当前 p{current}</span>
+          <span className="pill mono">{paragraphs.length} 段</span>
         </div>
-        <PdfViewer
-          paperId={paperId}
-          focusPage={focusPage}
-          highlights={highlights}
-          onPageChange={setCurrent}
-        />
+        <div className="reader-split">
+          <PdfViewer
+            paperId={paperId}
+            focusPage={focusPage}
+            highlights={highlights}
+            scrollTarget={pdfTarget}
+            onProgress={onPdfProgress}
+            onPageChange={setCurrent}
+          />
+          <ParaPane
+            paragraphs={paragraphs}
+            translations={translations}
+            translateEnabled={translateEnabled}
+            translatePending={pending}
+            targetId={paraTarget}
+            onProgress={onParaProgress}
+            onRequestTranslate={() => void translateVisible()}
+          />
+        </div>
       </main>
     </div>
   );

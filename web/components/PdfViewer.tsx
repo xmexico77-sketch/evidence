@@ -4,17 +4,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 
 export type HighlightBox = { page: number; bbox: number[] };
+export type ScrollProgress = { page: number; ratio: number };
 
 type Props = {
   paperId: string;
-  /** 需要高亮的框（来自问答引用的 anchor.boxes） */
   highlights?: HighlightBox[];
-  /** 跳转目标页（1-based） */
   focusPage?: number | null;
+  /** 由外部（双语侧栏）驱动的滚动目标 */
+  scrollTarget?: ScrollProgress | null;
+  /** 用户滚动 PDF 时回报阅读位置 */
+  onProgress?: (p: ScrollProgress) => void;
   onPageChange?: (page: number) => void;
 };
 
-/** PDF 点坐标（PyMuPDF 用左上原点、y 向下）→ PDF 用户空间（左下原点、y 向上）。 */
+/** PDF 点坐标（PyMuPDF 左上原点、y 向下）→ PDF 用户空间（左下原点、y 向上）。 */
 function toPdfSpace(bbox: number[], pageHeight: number): number[] {
   const [x0, y0, x1, y1] = bbox;
   return [x0, pageHeight - y1, x1, pageHeight - y0];
@@ -24,17 +27,20 @@ export default function PdfViewer({
   paperId,
   highlights = [],
   focusPage = null,
+  scrollTarget = null,
+  onProgress,
   onPageChange,
 }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const docRef = useRef<PDFDocumentProxy | null>(null);
   const pageEls = useRef<Map<number, HTMLDivElement>>(new Map());
   const rendered = useRef<Set<number>>(new Set());
+  const rafRef = useRef<number | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
 
-  // ---------- 渲染 ----------
+  // ---------- 渲染单页 ----------
   const renderPage = useCallback(
     async (pdf: PDFDocumentProxy, pageNo: number, host: HTMLDivElement) => {
       if (rendered.current.has(pageNo)) return;
@@ -63,9 +69,7 @@ export default function PdfViewer({
         transform: dpr === 1 ? undefined : [dpr, 0, 0, dpr, 0, 0],
       }).promise;
 
-      // 高亮层
-      const boxes = highlights.filter((h) => h.page === pageNo);
-      for (const box of boxes) {
+      for (const box of highlights.filter((h) => h.page === pageNo)) {
         const rect = viewport.convertToViewportRectangle(
           toPdfSpace(box.bbox, unscaled.height) as [number, number, number, number],
         );
@@ -105,20 +109,59 @@ export default function PdfViewer({
     };
   }, [paperId]);
 
-  // ---------- 首次渲染全部页 ----------
+  // ---------- 首次渲染 ----------
   useEffect(() => {
     if (status !== "ready" || !docRef.current) return;
     const pdf = docRef.current;
     (async () => {
       for (let p = 1; p <= pdf.numPages; p += 1) {
         const host = pageEls.current.get(p);
-        if (!host) continue;
-        await renderPage(pdf, p, host);
+        if (host) await renderPage(pdf, p, host);
       }
     })();
   }, [status, renderPage]);
 
-  // ---------- 跳转 ----------
+  // ---------- 滚动回报 ----------
+  useEffect(() => {
+    const c = containerRef.current;
+    if (!c || !onProgress) return;
+    const handler = () => {
+      if (rafRef.current !== null) return;
+      rafRef.current = window.requestAnimationFrame(() => {
+        rafRef.current = null;
+        const cRect = c.getBoundingClientRect();
+        let best: ScrollProgress | null = null;
+        for (const [p, el] of [...pageEls.current.entries()].sort((a, b) => a[0] - b[0])) {
+          const r = el.getBoundingClientRect();
+          if (r.height === 0) continue;
+          if (r.bottom > cRect.top + 40) {
+            const ratio = Math.min(Math.max((cRect.top - r.top) / r.height, 0), 1);
+            best = { page: p, ratio };
+            break;
+          }
+        }
+        if (best) onProgress(best);
+      });
+    };
+    c.addEventListener("scroll", handler, { passive: true });
+    return () => c.removeEventListener("scroll", handler);
+  }, [onProgress, status]);
+
+  // ---------- 外部驱动的滚动 ----------
+  useEffect(() => {
+    const c = containerRef.current;
+    if (!c || !scrollTarget) return;
+    const el = pageEls.current.get(scrollTarget.page);
+    if (!el) return;
+    const delta =
+      el.getBoundingClientRect().top -
+      c.getBoundingClientRect().top -
+      scrollTarget.ratio * el.clientHeight;
+    c.scrollBy({ top: delta });
+    onPageChange?.(scrollTarget.page);
+  }, [scrollTarget, onPageChange]);
+
+  // ---------- 跳转高亮 ----------
   useEffect(() => {
     if (!focusPage) return;
     const el = pageEls.current.get(focusPage);

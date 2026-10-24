@@ -19,7 +19,8 @@ from starlette.concurrency import run_in_threadpool
 
 from .config import PDF_DIR
 from .indexing import HybridRetriever, Store, build_chunks
-from .llm import DeepSeekClient, ExtractiveLLM, has_key
+from .llm import DeepSeekClient, ExtractiveLLM, Message, has_key
+from .llm.prompts import TRANSLATE_PARAGRAPH
 from .parsing import parse_pdf, summary
 from .rag import GroundedAnswerer
 
@@ -158,6 +159,70 @@ def paper_blocks(paper_id: str) -> dict:
     return {"pages": {str(k): v for k, v in pages.items()}}
 
 
+@app.get("/api/papers/{paper_id}/paragraphs")
+def paper_paragraphs(paper_id: str) -> dict:
+    """段落级正文 + 坐标，双语侧栏与联动滚动用。"""
+    store = get_state()["store"]
+    if store.get_paper(paper_id) is None:
+        raise HTTPException(404, "论文不存在")
+    return {"paragraphs": store.load_paragraphs(paper_id)}
+
+
+class TranslateRequest(BaseModel):
+    paper_id: str
+    lang: str = "zh"
+    block_ids: list[str] | None = None
+    limit: int = Field(default=25, ge=1, le=60)
+
+
+@app.post("/api/translate")
+def translate(req: TranslateRequest) -> dict:
+    """段落翻译（带缓存）。
+
+    未配置模型时明确返回 enabled=false，前端显示提示而不是编造译文——
+    伪造翻译比不给翻译更糟。
+    """
+    store = get_state()["store"]
+    if store.get_paper(req.paper_id) is None:
+        raise HTTPException(404, "论文不存在")
+
+    if not has_key():
+        return {
+            "enabled": False,
+            "translations": {},
+            "reason": "未配置 DEEPSEEK_API_KEY，不生成译文",
+        }
+
+    paragraphs = store.load_paragraphs(req.paper_id)
+    if req.block_ids:
+        wanted = set(req.block_ids)
+        paragraphs = [p for p in paragraphs if p["id"] in wanted]
+
+    cached = store.load_translations(req.paper_id, req.lang)
+    todo = [p for p in paragraphs if p["id"] not in cached and p["text"].strip()][: req.limit]
+
+    client = get_state()["llm"]
+    fresh: dict[str, str] = {}
+    for para in todo:
+        messages = [
+            _msg(role, content)
+            for role, content in TRANSLATE_PARAGRAPH.render(paragraph=para["text"][:1800])
+        ]
+        try:
+            fresh[para["id"]] = client.chat(messages).strip()
+        except Exception:  # noqa: BLE001 —— 单段失败不应中断整批
+            continue
+
+    store.save_translations(req.paper_id, req.lang, fresh)
+    merged = {**cached, **fresh}
+    return {
+        "enabled": True,
+        "translations": merged,
+        "translated": len(fresh),
+        "pending": max(0, len(paragraphs) - len(merged)),
+    }
+
+
 @app.get("/api/papers/{paper_id}/file")
 def paper_file(paper_id: str) -> FileResponse:
     """把原始 PDF 交给前端 PDF.js 渲染。"""
@@ -229,4 +294,8 @@ def _sse(payload: dict) -> str:
     import json
 
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _msg(role: str, content: str) -> Message:
+    return Message(role=role, content=content)
 

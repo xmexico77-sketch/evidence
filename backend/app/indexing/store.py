@@ -64,7 +64,8 @@ CREATE TABLE IF NOT EXISTS blocks (
     page       INTEGER,
     bbox       TEXT,
     order_idx  INTEGER,
-    section    TEXT
+    section    TEXT,
+    text       TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_blocks_paper ON blocks(paper_id);
@@ -81,6 +82,14 @@ CREATE TABLE IF NOT EXISTS headings (
 );
 
 CREATE INDEX IF NOT EXISTS idx_headings_paper ON headings(paper_id);
+
+CREATE TABLE IF NOT EXISTS translations (
+    paper_id TEXT NOT NULL,
+    block_id TEXT NOT NULL,
+    lang     TEXT NOT NULL,
+    text     TEXT,
+    PRIMARY KEY (paper_id, block_id, lang)
+);
 """
 
 
@@ -143,7 +152,8 @@ class Store:
         )
         cur.execute("DELETE FROM blocks WHERE paper_id=?", (paper.id,))
         cur.executemany(
-            "INSERT INTO blocks (id,paper_id,page,bbox,order_idx,section) VALUES (?,?,?,?,?,?)",
+            "INSERT INTO blocks (id,paper_id,page,bbox,order_idx,section,text) "
+            "VALUES (?,?,?,?,?,?,?)",
             [
                 (
                     b.id,
@@ -152,6 +162,7 @@ class Store:
                     ",".join(f"{v:.2f}" for v in b.bbox.to_list()),
                     b.order,
                     b.section_path,
+                    b.text,
                 )
                 for b in paper.blocks
             ],
@@ -234,6 +245,48 @@ class Store:
                 }
             )
         return out
+
+    def load_paragraphs(self, paper_id: str) -> list[dict]:
+        """段落级正文 + 坐标。双语侧栏与联动滚动都靠它。"""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id,page,bbox,section,text,order_idx FROM blocks "
+                "WHERE paper_id=? ORDER BY order_idx",
+                (paper_id,),
+            ).fetchall()
+        return [
+            {
+                "id": r[0],
+                "page": r[1],
+                "bbox": [float(x) for x in (r[2] or "").split(",") if x],
+                "section": r[3],
+                "text": r[4] or "",
+                "order": r[5],
+            }
+            for r in rows
+            if (r[4] or "").strip()
+        ]
+
+    def load_translations(self, paper_id: str, lang: str) -> dict[str, str]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT block_id, text FROM translations WHERE paper_id=? AND lang=?",
+                (paper_id, lang),
+            ).fetchall()
+        return {r[0]: r[1] for r in rows}
+
+    def save_translations(
+        self, paper_id: str, lang: str, mapping: dict[str, str]
+    ) -> None:
+        if not mapping:
+            return
+        with self._lock:
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO translations (paper_id,block_id,lang,text) "
+                "VALUES (?,?,?,?)",
+                [(paper_id, bid, lang, txt) for bid, txt in mapping.items()],
+            )
+            self.conn.commit()
 
     def get_paper(self, paper_id: str) -> dict | None:
         with self._lock:

@@ -355,3 +355,88 @@ button {
   mix-blend-mode: multiply;
 }
 
+/* ---------- 双语侧栏 ---------- */
+.reader-split {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+}
+.reader-split .pdf-scroll {
+  flex: 0 0 58%;
+}
+
+.para-pane {
+  flex: 1 1 42%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  padding-left: 16px;
+}
+
+.para-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  font-size: 12px;
+  color: var(--fg-faint);
+  font-family: var(--mono);
+  letter-spacing: 0.6px;
+}
+
+.para-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 40px;
+  scroll-behavior: smooth;
+}
+
+.para {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-left: 2px solid transparent;
+  margin-bottom: 6px;
+  transition: background 0.2s, border-color 0.2s;
+}
+.para:hover {
+  background: var(--bg-raise);
+}
+.para.active {
+  border-left-color: var(--accent);
+  background: var(--bg-raise);
+}
+.para.hit {
+  border-left-color: var(--warn);
+  background: #221d10;
+}
+
+.para-meta {
+  font-size: 10.5px;
+  color: var(--fg-faint);
+  margin-bottom: 4px;
+}
+
+.para-src {
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--fg-dim);
+}
+
+.para-zh {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--fg);
+  border-top: 1px dashed var(--line);
+  padding-top: 6px;
+}
+.para-zh.faint {
+  color: var(--fg-faint);
+  border-top-color: transparent;
+  font-size: 12px;
+}
+
+
