@@ -6,6 +6,22 @@ export type Health = {
   chunks: number;
 };
 
+export type Discovery = {
+  id: string;
+  title: string;
+  summary: string;
+  authors: string;
+  published: string;
+  categories: string;
+  relevance: number;
+  reproducibility: number;
+  score: number;
+  reason: string;
+  repo: string;
+  repo_stars: number;
+  cited_by: number;
+};
+
 export type Paragraph = {
   id: string;
   page: number;

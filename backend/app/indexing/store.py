@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -89,6 +90,29 @@ CREATE TABLE IF NOT EXISTS translations (
     lang     TEXT NOT NULL,
     text     TEXT,
     PRIMARY KEY (paper_id, block_id, lang)
+);
+
+CREATE TABLE IF NOT EXISTS discoveries (
+    id              TEXT PRIMARY KEY,
+    title           TEXT,
+    summary         TEXT,
+    authors         TEXT,
+    published       TEXT,
+    categories      TEXT,
+    relevance       REAL,
+    reproducibility REAL,
+    score           REAL,
+    reason          TEXT,
+    repo            TEXT,
+    repo_stars      INTEGER,
+    cited_by        INTEGER,
+    fetched_at      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS feedback (
+    discovery_id TEXT PRIMARY KEY,
+    verdict      INTEGER,
+    at           TEXT
 );
 """
 
@@ -287,6 +311,76 @@ class Store:
                 [(paper_id, bid, lang, txt) for bid, txt in mapping.items()],
             )
             self.conn.commit()
+
+    def save_discoveries(self, items: list[dict]) -> None:
+        if not items:
+            return
+        with self._lock:
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO discoveries "
+                "(id,title,summary,authors,published,categories,relevance,reproducibility,"
+                "score,reason,repo,repo_stars,cited_by,fetched_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                [
+                    (
+                        d["id"],
+                        d["title"],
+                        d.get("summary", ""),
+                        d.get("authors", ""),
+                        d.get("published", ""),
+                        d.get("categories", ""),
+                        d.get("relevance", 0.0),
+                        d.get("reproducibility", 0.0),
+                        d.get("score", 0.0),
+                        d.get("reason", ""),
+                        d.get("repo", ""),
+                        d.get("repo_stars", 0),
+                        d.get("cited_by", 0),
+                        d.get("fetched_at", ""),
+                    )
+                    for d in items
+                ],
+            )
+            self.conn.commit()
+
+    def list_discoveries(self, limit: int = 30) -> list[dict]:
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id,title,summary,authors,published,categories,relevance,"
+                "reproducibility,score,reason,repo,repo_stars,cited_by,fetched_at "
+                "FROM discoveries ORDER BY score DESC, fetched_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        keys = [
+            "id",
+            "title",
+            "summary",
+            "authors",
+            "published",
+            "categories",
+            "relevance",
+            "reproducibility",
+            "score",
+            "reason",
+            "repo",
+            "repo_stars",
+            "cited_by",
+            "fetched_at",
+        ]
+        return [dict(zip(keys, r, strict=False)) for r in rows]
+
+    def set_feedback(self, discovery_id: str, verdict: int) -> None:
+        with self._lock:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO feedback (discovery_id, verdict, at) VALUES (?,?,?)",
+                (discovery_id, verdict, time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+            )
+            self.conn.commit()
+
+    def load_feedback(self) -> dict[str, int]:
+        with self._lock:
+            rows = self.conn.execute("SELECT discovery_id, verdict FROM feedback").fetchall()
+        return {r[0]: int(r[1]) for r in rows}
 
     def get_paper(self, paper_id: str) -> dict | None:
         with self._lock:

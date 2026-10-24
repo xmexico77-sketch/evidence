@@ -19,6 +19,9 @@ from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
 from .config import DATA_DIR, PDF_DIR
+from .discovery import fetch as fetch_arxiv
+from .discovery.recommend import ingest as ingest_discovery
+from .discovery.recommend import recommend
 from .indexing import HybridRetriever, Store, build_chunks
 from .llm import DeepSeekClient, ExtractiveLLM, Message, has_key
 from .llm.prompts import TRANSLATE_PARAGRAPH
@@ -205,6 +208,75 @@ async def make_chart(file: UploadFile = File(...)) -> ChartResponse:
         reason=result.spec.reason,
         stats=result.stats,
     )
+
+
+class FeedbackRequest(BaseModel):
+    id: str
+    verdict: int = Field(ge=-1, le=1)
+
+
+class IngestRequest(BaseModel):
+    arxiv_id: str
+
+
+@app.get("/api/discover")
+async def discover(
+    q: str | None = None,
+    category: str = "cs.CL",
+    limit: int = 8,
+    enrich: bool = True,
+) -> dict:
+    """检索或追踪论文，按相关度+可复现性+偏好排序。"""
+    store = get_state()["store"]
+
+    def _run():
+        items = recommend(
+            store, query=q, category=category, limit=limit, enrich=enrich
+        )
+        store.save_discoveries(items)
+        return items
+
+    try:
+        items = await run_in_threadpool(_run)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"外部检索失败: {exc}") from exc
+    return {"items": items, "mode": "search" if q else "track", "category": category}
+
+
+@app.get("/api/discover/list")
+def discover_list(limit: int = 20) -> dict:
+    return {"items": get_state()["store"].list_discoveries(limit)}
+
+
+@app.post("/api/discover/feedback")
+def discover_feedback(req: FeedbackRequest) -> dict:
+    store = get_state()["store"]
+    store.set_feedback(req.id, req.verdict)
+    return {"ok": True, "feedback": store.load_feedback()}
+
+
+@app.post("/api/discover/ingest")
+async def discover_ingest(req: IngestRequest) -> dict:
+    """智能下钻：下载 PDF -> 解析 -> 分块 -> 入库。"""
+    store = get_state()["store"]
+
+    def _run():
+        paper = fetch_arxiv(req.arxiv_id)
+        if paper is None:
+            raise HTTPException(404, f"arXiv 未找到 {req.arxiv_id}")
+        info = ingest_discovery(store, paper, PDF_DIR, build_chunks, parse_pdf)
+        reset_state()  # 索引变了，重建检索器缓存
+        st = get_state()
+        st["retriever"].build_bm25()
+        embedded = st["retriever"].embed_missing()
+        return {**info, "embedded": embedded}
+
+    try:
+        return await run_in_threadpool(_run)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(502, f"下钻失败: {exc}") from exc
 
 
 @app.get("/api/papers/{paper_id}/paragraphs")

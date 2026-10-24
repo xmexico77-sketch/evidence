@@ -53,6 +53,11 @@ export default function Workbench() {
           <strong>证源</strong>
           <span>Evidence</span>
         </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <Link href="/discover" className="pill">
+            论文发现 →
+          </Link>
+        </div>
         <div>
           {health ? (
             <span className="pill ok">● 已连接 · {health.chunks} 块</span>

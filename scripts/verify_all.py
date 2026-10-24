@@ -62,6 +62,12 @@ CHECKS = [
         "heavy": False,
         "covers": "模块六",
     },
+    {
+        "name": "论文发现（去重/可复现性加权/反馈/BibTeX）",
+        "script": "verify_discovery.py",
+        "heavy": True,
+        "covers": "模块四",
+    },
 ]
 
 
