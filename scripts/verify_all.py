@@ -80,6 +80,12 @@ CHECKS = [
         "heavy": True,
         "covers": "模块六",
     },
+    {
+        "name": "前端冒烟（页面可达/导航一致/无残留）",
+        "script": "test_web.py",
+        "heavy": False,
+        "covers": "交付",
+    },
 ]
 
 

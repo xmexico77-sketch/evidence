@@ -1,45 +1,45 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 /**
  * 全局登录守卫。
  *
- * AUTH_ENABLED=0 时后端直接放行，这里什么都不做；
- * 开启后若 /api/me 拿不到用户，跳转到 /login 并带上回跳地址。
+ * 设计要点：**不阻塞渲染**。早期版本在等待 /api/me 时返回"正在校验会话…"，
+ * 结果每个页面的 SSR 输出都变成这句占位，用户每次都看到一次闪烁，
+ * 而且搜索引擎/截图拿到的也是空白页。
+ * 现在改为始终渲染子节点，鉴权在后台进行，只有确认未登录才跳转。
  */
 export default function AuthGate({ children }: { children: React.ReactNode }) {
-  const [ready, setReady] = useState(false);
-
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (window.location.pathname === "/login") {
-      setReady(true);
-      return;
-    }
+    if (window.location.pathname === "/login") return;
+
+    let cancelled = false;
     (async () => {
       try {
         const res = await fetch("/api/me", { cache: "no-store" });
-        if (res.ok) {
-          const data = (await res.json()) as { user: string | null; auth_enabled: boolean };
-          if (!data.auth_enabled || data.user) {
-            setReady(true);
-            return;
-          }
-        }
+        if (cancelled) return;
         if (res.status === 401) {
           const next = encodeURIComponent(window.location.pathname);
           window.location.href = `/login?next=${next}`;
           return;
         }
-        // 网络异常时不要卡死页面
-        setReady(true);
+        if (!res.ok) return;
+        const data = (await res.json()) as { user: string | null; auth_enabled: boolean };
+        if (data.auth_enabled && !data.user) {
+          const next = encodeURIComponent(window.location.pathname);
+          window.location.href = `/login?next=${next}`;
+        }
       } catch {
-        setReady(true);
+        /* 网络异常时不打扰用户，接口层会给出各自错误提示 */
       }
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  if (!ready) return <div className="empty" style={{ padding: 40 }}>正在校验会话…</div>;
   return <>{children}</>;
 }

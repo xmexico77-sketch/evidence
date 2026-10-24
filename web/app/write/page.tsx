@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useState } from "react";
+import { Sidebar } from "@/components/Nav";
+import { ErrorCard, Loading } from "@/components/ui";
 
 type Section = {
   heading: string;
@@ -74,14 +76,7 @@ export default function WritePage() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <strong>证源</strong>
-          <span>Write</span>
-        </div>
-        <Link href="/" className="pill" style={{ alignSelf: "flex-start" }}>
-          ← 返回工作台
-        </Link>
+      <Sidebar current="write">
         <div>
           <p className="section-title">生成规则</p>
           <div className="dim" style={{ fontSize: 12, lineHeight: 1.8 }}>
@@ -97,7 +92,7 @@ export default function WritePage() {
             复制 Markdown
           </button>
         )}
-      </aside>
+      </Sidebar>
 
       <main className="main">
         <h1 style={{ fontSize: 20, margin: "0 0 4px" }}>论文框架生成</h1>
@@ -132,11 +127,8 @@ export default function WritePage() {
           ))}
         </div>
 
-        {err && (
-          <div className="card" style={{ borderColor: "#4d2424", color: "var(--bad)" }}>
-            {err}
-          </div>
-        )}
+        {busy && <Loading label="正在生成提纲与章节草稿…" />}
+        {err && <ErrorCard title="框架生成失败" detail={err} />}
 
         {fw && (
           <>

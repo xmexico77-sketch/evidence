@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ParaPane from "@/components/ParaPane";
 import PdfViewer, { type ScrollProgress } from "@/components/PdfViewer";
+import { Sidebar } from "@/components/Nav";
+import { Empty, ErrorCard } from "@/components/ui";
 import type { OutlineItem, Paragraph } from "@/lib/types";
 
 const SYNC_LOCK_MS = 700;
@@ -129,20 +131,13 @@ export default function Reader({
 
   return (
     <div className="shell reader-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <strong>证源</strong>
-          <span>Reader</span>
-        </div>
-        <Link href="/" className="pill" style={{ alignSelf: "flex-start" }}>
-          ← 返回工作台
-        </Link>
+      <Sidebar current="reader">
         <div>
           <p className="section-title">
             标题树 <span className="faint">· 当前 p{current}</span>
           </p>
-          {err && <div className="empty">加载失败：{err}</div>}
-          {outline.length === 0 && !err && <div className="empty">暂无大纲</div>}
+          {err && <ErrorCard title="大纲加载失败" detail={err} />}
+          {outline.length === 0 && !err && <Empty>暂无大纲</Empty>}
           <div className="outline">
             {outline.map((h, i) => (
               <button
@@ -161,7 +156,7 @@ export default function Reader({
             ))}
           </div>
         </div>
-      </aside>
+      </Sidebar>
 
       <main className="reader-main">
         <div className="reader-head">

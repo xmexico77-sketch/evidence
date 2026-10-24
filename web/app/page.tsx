@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { Sidebar } from "@/components/Nav";
 import { api } from "@/lib/api";
 import type { AskResponse, Health, Paper } from "@/lib/types";
 
@@ -48,22 +49,7 @@ export default function Workbench() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <strong>证源</strong>
-          <span>Evidence</span>
-        </div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <Link href="/discover" className="pill">
-            论文发现
-          </Link>
-          <Link href="/graph" className="pill">
-            引用图谱
-          </Link>
-          <Link href="/write" className="pill">
-            论文框架
-          </Link>
-        </div>
+      <Sidebar current="home">
         <div>
           {health ? (
             <span className="pill ok">● 已连接 · {health.chunks} 块</span>
@@ -98,7 +84,7 @@ export default function Workbench() {
             </span>
           </div>
         )}
-      </aside>
+      </Sidebar>
 
       <main className="main">
         <h1 style={{ fontSize: 20, margin: "0 0 4px" }}>科研问答</h1>

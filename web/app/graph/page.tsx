@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Sidebar } from "@/components/Nav";
+import { ErrorCard, Loading } from "@/components/ui";
 import type { GraphPayload, GraphStat, ReviewPayload } from "@/lib/types";
 
 const COMMUNITY_COLORS = [
@@ -161,15 +163,7 @@ export default function GraphPage() {
 
   return (
     <div className="shell" style={{ gridTemplateColumns: "300px minmax(0,1fr) 330px" }}>
-      <aside className="sidebar">
-        <div className="brand">
-          <strong>证源</strong>
-          <span>Graph</span>
-        </div>
-        <Link href="/" className="pill" style={{ alignSelf: "flex-start" }}>
-          ← 返回工作台
-        </Link>
-
+      <Sidebar current="graph">
         {payload && (
           <>
             <div>
@@ -221,7 +215,7 @@ export default function GraphPage() {
             </button>
           </>
         )}
-      </aside>
+      </Sidebar>
 
       <main className="reader-main" style={{ padding: "18px 20px 0" }}>
         <div className="reader-head">
@@ -232,11 +226,7 @@ export default function GraphPage() {
             </span>
           )}
         </div>
-        {err && (
-          <div className="card" style={{ borderColor: "#4d2424", color: "var(--bad)" }}>
-            {err}
-          </div>
-        )}
+        {err && <ErrorCard title="图谱渲染或加载失败" detail={err} />}
         <div
           ref={containerRef}
           style={{

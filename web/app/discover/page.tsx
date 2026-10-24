@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { Sidebar } from "@/components/Nav";
+import { ErrorCard, Loading } from "@/components/ui";
 import type { Discovery } from "@/lib/types";
 
 const CATEGORIES = ["cs.CL", "cs.CV", "cs.LG", "cs.AI", "cs.IR"];
@@ -81,14 +83,7 @@ export default function DiscoverPage() {
 
   return (
     <div className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <strong>证源</strong>
-          <span>Discover</span>
-        </div>
-        <Link href="/" className="pill" style={{ alignSelf: "flex-start" }}>
-          ← 返回工作台
-        </Link>
+      <Sidebar current="discover">
         <div>
           <p className="section-title">分类</p>
           {CATEGORIES.map((c) => (
@@ -111,7 +106,7 @@ export default function DiscoverPage() {
             15% 方向偏好（点赞记录）
           </div>
         </div>
-      </aside>
+      </Sidebar>
 
       <main className="main">
         <h1 style={{ fontSize: 20, margin: "0 0 4px" }}>论文发现</h1>
@@ -141,11 +136,8 @@ export default function DiscoverPage() {
         </div>
 
         {note && <div className="card" style={{ marginBottom: 14 }}>{note}</div>}
-        {err && (
-          <div className="card" style={{ borderColor: "#4d2424", color: "var(--bad)" }}>
-            {err}
-          </div>
-        )}
+        {busy && <Loading label="正在检索 arXiv 并补全开源实现信息…" />}
+        {err && <ErrorCard title="检索失败" detail={err} />}
 
         {items.map((d) => (
           <div className="card" key={d.id} style={{ marginBottom: 10 }}>
