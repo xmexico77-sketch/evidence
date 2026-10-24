@@ -5,17 +5,23 @@
 """
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PARSED = ROOT / "data" / "parsed"
+sys.path.insert(0, str(ROOT / "backend"))
+
+from app.parsing import parse_pdf  # noqa: E402
+
+PDF = ROOT / "data" / "pdf" / "1706.03762v1.pdf"
 
 # 官方测试用例 3.1：Attention Is All You Need v1
+# 注：v1 的参考文献实际为 36 条（编号 1–36 连续，末条为 Zhu 等）。
+# 早期阈值 38 是按"过度切分"产生的 41 条校准的——那 5 条是垃圾条目，
+# 修好切分后反而低于阈值。断言应按真实值定，不能按历史峰值定。
 EXPECT_V1 = {
     "title": "Attention Is All You Need",
-    "min_references": 38,
+    "min_references": 34,
     "min_citations": 30,
     "required_headings": [
         "1",
@@ -43,10 +49,10 @@ EXPECT_V1 = {
 
 
 def load(paper_id: str) -> dict:
-    path = PARSED / f"{paper_id}.json"
-    if not path.exists():
-        raise SystemExit(f"缺少解析产物 {path}，先跑 scripts/parse_cli.py")
-    return json.loads(path.read_text(encoding="utf-8"))
+    """实时解析，保证断言跑的是当前代码而不是历史产物。"""
+    if not PDF.exists():
+        raise SystemExit(f"缺少测试 PDF {PDF}")
+    return parse_pdf(PDF).to_dict()
 
 
 def check(paper: dict, expect: dict) -> list[str]:

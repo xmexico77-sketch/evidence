@@ -156,6 +156,15 @@ def parse_pdf(path: str | Path, paper_id: str | None = None) -> Paper:
         missing = {c.ref_index for c in paper.citations} - {r.index for r in paper.references}
         if missing:
             paper.warnings.append(f"正文引用了不存在的参考文献编号: {sorted(missing)[:10]}")
+        # 编号式引用为空时，尝试作者-年份式（ACL/ICML/NeurIPS 模板）
+        if not paper.citations:
+            paper.citations = R.parse_author_year_citations(
+                all_blocks, paper.references, ref_start
+            )
+            if paper.citations:
+                paper.warnings.append(
+                    f"该论文使用作者-年份式引用，已解析 {len(paper.citations)} 处"
+                )
     else:
         paper.warnings.append("未定位到 References 章节")
 

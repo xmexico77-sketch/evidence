@@ -26,8 +26,10 @@ MIN_SIDE_RATIO = 0.15
 SPACE_GAP_RATIO = 0.18
 # 字符间隙超过字号的这个比例，认为是栏/块之间的断裂
 RUN_BREAK_RATIO = 1.15
-# 同一块内字号跳变超过该值必须断开
-SIZE_BREAK = 0.8
+# 同一块内字号跳变超过该值必须断开。
+# 0.8 太严：ACL 模板同一栏里 11.0/10.0 交替（公式、上标），会被切成一行一块。
+# 1.5 能容纳这种跳变，同时仍能分开正文（10pt）与标题（12pt）。
+SIZE_BREAK = 1.5
 
 
 @dataclass(slots=True)
@@ -245,6 +247,61 @@ def _inside_any(bbox: BBox, zones: list[BBox]) -> bool:
     return False
 
 
+MIN_BLOCK_CHARS = 36
+# 这些短标题绝不能被并进上一块，否则参考文献区会整体消失
+_PROTECTED_TITLES = {
+    "references",
+    "bibliography",
+    "acknowledgments",
+    "acknowledgements",
+    "appendix",
+    "abstract",
+    "摘要",
+    "参考文献",
+}
+
+
+def _merge_short_blocks(blocks: list[Block], min_chars: int = MIN_BLOCK_CHARS) -> list[Block]:
+    """把过短的碎块并回上一块（同页同栏，且前后都不是标题行）。
+
+    实测 ACL / ICML 模板（Longformer、CLIP）会被切成每页 60–75 块，
+    接近"一行一块"：既撑大索引，又让标题树与分块噪声变多。
+    这是保守的后处理——只合并"短且不该独立成块"的碎片，不动真正的段落。
+
+    踩过的坑：早期版本没检查**当前块**是不是标题，结果把
+    "References" 这种短标题并进了上一段，整篇论文的参考文献区直接消失。
+    """
+    out: list[Block] = []
+    for blk in blocks:
+        blob = blk.text.strip()
+        protected = (
+            blob.lower().strip(" .:") in _PROTECTED_TITLES
+            or (blk.lines and _looks_like_heading_line(blk.lines[-1]))
+        )
+        if (
+            out
+            and len(blk.text) < min_chars
+            and not protected
+            and not blk.is_full_width
+            and out[-1].page == blk.page
+            and out[-1].column == blk.column
+            and out[-1].lines
+            and not _looks_like_heading_line(out[-1].lines[-1])
+        ):
+            prev = out[-1]
+            prev.text = f"{prev.text} {blk.text}".strip()
+            prev.bbox = BBox(
+                min(prev.bbox.x0, blk.bbox.x0),
+                min(prev.bbox.y0, blk.bbox.y0),
+                max(prev.bbox.x1, blk.bbox.x1),
+                max(prev.bbox.y1, blk.bbox.y1),
+            )
+            prev.lines.extend(blk.lines)
+            continue
+        out.append(blk)
+    return out
+
+
 def build_blocks(
     page: pymupdf.Page,
     page_no: int,
@@ -314,6 +371,7 @@ def build_blocks(
         )
 
     ordered = _reading_order(raw_blocks, layout)
+    ordered = _merge_short_blocks(ordered)
     for idx, blk in enumerate(ordered):
         blk.order = start_order + idx
         blk.id = f"p{page_no}_b{idx:03d}"

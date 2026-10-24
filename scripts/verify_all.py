@@ -86,6 +86,12 @@ CHECKS = [
         "heavy": False,
         "covers": "交付",
     },
+    {
+        "name": "版式泛化（5 篇未见论文的解析鲁棒性）",
+        "script": "test_layouts.py",
+        "heavy": True,
+        "covers": "模块一",
+    },
 ]
 
 

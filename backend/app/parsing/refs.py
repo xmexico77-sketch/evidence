@@ -200,6 +200,73 @@ def parse_citations(blocks: list[Block], ref_start: int | None) -> list[Citation
     return out
 
 
+# 作者-年份式引用，ACL / ICML / NeurIPS 常见：(Vaswani et al., 2017) / (Devlin and others, 2019)
+_AUTHOR_YEAR_RE = re.compile(
+    r"\(([A-Z][A-Za-z\-'’]{2,})(?:\s+et\s+al\.?)?(?:\s*(?:,|&|and)\s*[A-Z][A-Za-z\-'’]+)*,?\s*((?:19|20)\d{2})[a-z]?\)"
+)
+_REF_YEAR_RE = re.compile(r"\b((?:19|20)\d{2})\b")
+
+
+def _first_surname(ref_text: str) -> str:
+    """取参考文献条目的第一作者姓氏，用于与正文引用对齐。
+
+    两种常见顺序都要认：
+    - "Vaswani, Ashish, ..."（Springer/ICML 的"姓, 名"）
+    - "Danqi Chen, Adam Fisch, ..."（ACL 的"名 姓"）
+    实测 ACL 模板下只认前者会把 "Danqi Chen" 当成姓 Danqi，导致引用全部匹配失败。
+    """
+    text = ref_text.strip()
+    m = re.match(r"^([A-Z][A-Za-z\-'’]{2,})\s*,", text)
+    if m:
+        return m.group(1).lower()
+    m = re.match(r"^[A-Z][A-Za-z\-'’]{1,}\s+([A-Z][A-Za-z\-'’]{2,})\s*,", text)
+    if m:
+        return m.group(1).lower()
+    m = re.match(r"^[A-Z][a-z]+\s+([A-Z][A-Za-z\-'’]{2,})\b", text)
+    return m.group(1).lower() if m else ""
+
+
+def parse_author_year_citations(
+    blocks: list[Block], references: list[Reference], ref_start: int | None
+) -> list[Citation]:
+    """解析 (Author, Year) 式引用，并映射到参考文献条目。
+
+    这类论文（ACL / ICML / NeurIPS 模板）正文里没有 [n]，只有作者+年份。
+    不处理的话，阅读器的"引用双向跳转"在这类论文上完全失效——
+    实测 CLIP 与 Longformer 的引用数都是 0，就是因为它只认 [n]。
+    """
+    if not references:
+        return []
+
+    index: dict[tuple[str, str], int] = {}
+    for ref in references:
+        surname = _first_surname(ref.text)
+        year_match = _REF_YEAR_RE.search(ref.text)
+        if surname and year_match:
+            index.setdefault((surname, year_match.group(1)), ref.index)
+
+    out: list[Citation] = []
+    for idx, blk in enumerate(blocks):
+        if ref_start is not None and idx >= ref_start:
+            continue
+        if blk.is_heading:
+            continue
+        for m in _AUTHOR_YEAR_RE.finditer(blk.text):
+            surname, year = m.group(1).lower(), m.group(2)
+            ref_index = index.get((surname, year))
+            if ref_index is None:
+                continue
+            out.append(
+                Citation(
+                    marker=m.group(0),
+                    ref_index=ref_index,
+                    block_id=blk.id,
+                    page=blk.page,
+                )
+            )
+    return out
+
+
 def _expand_marker(inner: str) -> list[int]:
     nums: list[int] = []
     for part in inner.split(","):
