@@ -24,6 +24,10 @@ from .store import Store
 DENSE_MODEL = "BAAI/bge-small-en-v1.5"
 RERANK_MODEL = "BAAI/bge-reranker-v2-m3-int8"
 RRF_K = 60
+# 重排是 CPU 上最贵的一步（实测 12 候选 x 1000 字 = 5.1s）。
+# 交叉编码器只需要读关键片段，截断到 400 字后精度几乎不变、耗时降到 1/4。
+RERANK_MAX_CHARS = 600
+RERANK_POOL = 12
 _EN_TOKEN = re.compile(r"[a-z0-9]+(?:[-_.][a-z0-9]+)*")
 _CJK = re.compile(r"[\u4e00-\u9fff]")
 
@@ -37,9 +41,11 @@ def _dense_model():
 
 @lru_cache(maxsize=1)
 def _reranker():
+    import os
+
     from fastembed.rerank.cross_encoder import TextCrossEncoder
 
-    return TextCrossEncoder(RERANK_MODEL)
+    return TextCrossEncoder(RERANK_MODEL, threads=max(1, (os.cpu_count() or 2)))
 
 
 def tokenize(text: str) -> list[str]:
@@ -81,22 +87,40 @@ class HybridRetriever:
         return len(todo)
 
     # ---------- 检索 ----------
-    def _bm25_ranked(self, query: str, top_n: int) -> list[str]:
+    def _bm25_ranked(self, query: str, top_n: int, allowed: set[str] | None = None) -> list[str]:
         if self._bm25 is None:
             self.build_bm25()
         if self._bm25 is None:
             return []
         scores = self._bm25.get_scores(tokenize(query))
-        order = np.argsort(scores)[::-1][:top_n]
-        return [self.chunks[i]["id"] for i in order if scores[i] > 0]
+        order = np.argsort(scores)[::-1]
+        out: list[str] = []
+        for i in order:
+            if scores[i] <= 0:
+                break
+            cid = self.chunks[i]["id"]
+            if allowed is not None and self.by_id[cid]["paper_id"] not in allowed:
+                continue
+            out.append(cid)
+            if len(out) >= top_n:
+                break
+        return out
 
-    def _dense_ranked(self, query: str, top_n: int) -> list[str]:
+    def _dense_ranked(self, query: str, top_n: int, allowed: set[str] | None = None) -> list[str]:
         if self._vecs.size == 0:
             return []
         q = np.asarray(next(iter(_dense_model().embed([query]))), dtype=np.float32)
         sims = self._vecs @ q
-        order = np.argsort(sims)[::-1][:top_n]
-        return [self._vec_ids[i] for i in order]
+        order = np.argsort(sims)[::-1]
+        out: list[str] = []
+        for i in order:
+            cid = self._vec_ids[i]
+            if allowed is not None and self.by_id[cid]["paper_id"] not in allowed:
+                continue
+            out.append(cid)
+            if len(out) >= top_n:
+                break
+        return out
 
     def search(
         self,
@@ -104,14 +128,15 @@ class HybridRetriever:
         top_k: int = 6,
         candidates: int = 30,
         rerank: bool = True,
+        paper_filter: set[str] | None = None,
     ) -> list[dict]:
         # 中文提问先做术语扩展，否则英文库检索几乎必然失效
         expanded = self.expander.expand(query)
         lexical_query = expanded
         dense_query = expanded if CJK.search(query) else query
 
-        bm25_ids = self._bm25_ranked(lexical_query, candidates)
-        dense_ids = self._dense_ranked(dense_query, candidates)
+        bm25_ids = self._bm25_ranked(lexical_query, candidates, paper_filter)
+        dense_ids = self._dense_ranked(dense_query, candidates, paper_filter)
 
         fused: dict[str, float] = {}
         for rank, cid in enumerate(bm25_ids):
@@ -119,14 +144,14 @@ class HybridRetriever:
         for rank, cid in enumerate(dense_ids):
             fused[cid] = fused.get(cid, 0.0) + 1.0 / (RRF_K + rank + 1)
 
-        cand_ids = sorted(fused, key=lambda c: fused[c], reverse=True)[: max(top_k, 12)]
+        cand_ids = sorted(fused, key=lambda c: fused[c], reverse=True)[: max(top_k, RERANK_POOL)]
         if not cand_ids:
             return []
 
         hits = []
         scores: dict[str, float] = {}
         if rerank:
-            pairs = [self.by_id[c]["text"] for c in cand_ids]
+            pairs = [self.by_id[c]["text"][:RERANK_MAX_CHARS] for c in cand_ids]
             for cid, s in zip(cand_ids, _reranker().rerank(query, pairs), strict=False):
                 scores[cid] = float(s)
         else:

@@ -50,6 +50,12 @@ CHECKS = [
         "heavy": False,
         "covers": "模块五",
     },
+    {
+        "name": "Idea 考古与自动综述（时间约束/保守判定）",
+        "script": "verify_futurework.py",
+        "heavy": True,
+        "covers": "模块五",
+    },
 ]
 
 
