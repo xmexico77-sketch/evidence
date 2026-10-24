@@ -14,15 +14,17 @@ from pathlib import Path
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from .config import PDF_DIR
+from .config import DATA_DIR, PDF_DIR
 from .indexing import HybridRetriever, Store, build_chunks
 from .llm import DeepSeekClient, ExtractiveLLM, Message, has_key
 from .llm.prompts import TRANSLATE_PARAGRAPH
 from .parsing import parse_pdf, summary
 from .rag import GroundedAnswerer
+from .writing import build_chart
 
 app = FastAPI(title="证源 Evidence API", version="0.1.0")
 app.add_middleware(
@@ -31,6 +33,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+SAMPLE_DIR = DATA_DIR / "samples"
+FIGURES_DIR = DATA_DIR / "figures"
+FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/figures", StaticFiles(directory=str(FIGURES_DIR)), name="figures")
 
 _state: dict = {}
 
@@ -157,6 +164,47 @@ def paper_blocks(paper_id: str) -> dict:
         raise HTTPException(404, "论文不存在")
     pages = store.load_pages_blocks(paper_id)
     return {"pages": {str(k): v for k, v in pages.items()}}
+
+
+class ChartResponse(BaseModel):
+    kind: str
+    png: str
+    svg: str
+    script: str
+    caption: str
+    reason: str
+    stats: dict
+
+
+@app.post("/api/charts", response_model=ChartResponse)
+async def make_chart(file: UploadFile = File(...)) -> ChartResponse:
+    """上传 CSV，自动选图型、出学术图、给图注与可复现脚本。"""
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(400, "只接受 CSV 文件")
+    stem = Path(file.filename).stem or "chart"
+    dest = SAMPLE_DIR / f"{stem}.csv"
+    SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
+    with dest.open("wb") as fh:
+        shutil.copyfileobj(file.file, fh)
+
+    def _run():
+        llm = get_state()["llm"] if has_key() else None
+        return build_chart(dest, stem=stem, llm=llm)
+
+    try:
+        result = await run_in_threadpool(_run)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, f"绘图失败: {exc}") from exc
+
+    return ChartResponse(
+        kind=result.kind,
+        png=result.png,
+        svg=result.svg,
+        script=result.script,
+        caption=result.caption,
+        reason=result.spec.reason,
+        stats=result.stats,
+    )
 
 
 @app.get("/api/papers/{paper_id}/paragraphs")

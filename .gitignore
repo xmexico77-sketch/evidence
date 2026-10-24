@@ -23,6 +23,7 @@ out/
 data/pdf/
 data/parsed/
 data/index/
+data/figures/
 
 # --- 产出物 ---
 dist/

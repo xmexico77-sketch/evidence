@@ -56,6 +56,12 @@ CHECKS = [
         "heavy": True,
         "covers": "模块五",
     },
+    {
+        "name": "数据可视化（选型/分轴/图注/可复现脚本）",
+        "script": "verify_charts.py",
+        "heavy": False,
+        "covers": "模块六",
+    },
 ]
 
 

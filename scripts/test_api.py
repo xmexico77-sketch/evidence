@@ -68,6 +68,23 @@ def main() -> int:
     check("stream 200", r.status_code == 200)
     check("stream 事件协议", '"type": "done"' in r.text, r.text[:120])
 
+    # CSV -> 学术图表（模块六）
+    csv_path = ROOT / "data" / "samples" / "training_curves.csv"
+    if csv_path.exists():
+        r = client.post(
+            "/api/charts",
+            files={"file": ("training_curves.csv", csv_path.read_bytes(), "text/csv")},
+        )
+        check("charts 200", r.status_code == 200, f"{r.status_code} {r.text[:160]}")
+        if r.status_code == 200:
+            data = r.json()
+            check("charts 返回图注", len(data.get("caption", "")) > 20)
+            check("charts 返回脚本", data.get("script", "").endswith(".py"))
+            check("charts 返回 PNG 名", data.get("png", "").endswith(".png"))
+            check("charts 给出选型理由", len(data.get("reason", "")) > 4)
+    else:
+        check("示例 CSV 缺失", False, str(csv_path))
+
     passed = sum(1 for ok, _, _ in results if ok)
     for ok, name, detail in results:
         print(f"[{'PASS' if ok else 'FAIL'}] {name}" + (f"  ({detail})" if detail and not ok else ""))

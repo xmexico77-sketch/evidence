@@ -126,6 +126,21 @@ AREA_REVIEW = Prompt(
     user="【聚类主题】\n{theme}\n\n【文献】\n{evidence}\n",
 )
 
+# ---------------------------------------------------------------- 图表图注
+FIGURE_CAPTION = Prompt(
+    name="figure_caption",
+    version="1.0.0",
+    system=(
+        "你在为学术论文撰写图注（Figure Caption）。要求：\n"
+        "1. 第一句说明图中各变量之间的关系（不要把坐标轴名复述一遍）；\n"
+        "2. 第二句提炼核心趋势或异常，必须使用给出的具体数字；\n"
+        "3. 全文不超过 60 词，英文，不使用 'This figure shows' 这类空话；\n"
+        "4. 只能使用给定统计量，禁止编造任何数值；\n"
+        "5. 只输出图注正文，不要标题、不要编号。"
+    ),
+    user="图型：{kind}\n横轴：{x}\n序列：{series}\n统计量：\n{stats}\n",
+)
+
 ALL_PROMPTS = {
     p.name: p
     for p in (
@@ -136,5 +151,6 @@ ALL_PROMPTS = {
         CITATION_REPAIR,
         FUTURE_JUDGE,
         AREA_REVIEW,
+        FIGURE_CAPTION,
     )
 }
