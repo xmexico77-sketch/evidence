@@ -21,6 +21,9 @@ from ..llm.prompts import CITATION_REPAIR, GROUNDED_ANSWER
 # 两者混在同一条正则里会让校验器把合法引用判成越界（实测踩到）。
 CITE_RE = re.compile(r"\[E(\d{1,2})\]")
 INSUFFICIENT_PREFIX = "证据不足"
+# 相关性闸门：重排模型对"最佳证据"的分数低于此值，视为没有可支撑答案的内容。
+# 实测可答问题 +2.2 / +3.8，越界问题 -7.5，零阈值即可分开。
+MIN_CONFIDENCE = 0.0
 
 
 @dataclass(slots=True)
@@ -43,6 +46,7 @@ class AnswerResult:
     insufficient: bool = False
     invalid_markers: list[int] = field(default_factory=list)
     evidence_used: int = 0
+    confidence: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -54,6 +58,7 @@ class AnswerResult:
             "insufficient": self.insufficient,
             "invalid_markers": self.invalid_markers,
             "evidence_used": self.evidence_used,
+            "confidence": self.confidence,
         }
 
 
@@ -117,6 +122,20 @@ class GroundedAnswerer:
                 insufficient=True,
             )
 
+        # 相关性闸门：先判断"有没有内容能回答这个问题"，再谈标注。
+        # 没有这道门，模型会把一段无关原文配上合法锚点，看起来"有据"却答非所问。
+        confidence = max(float(h.get("score") or 0.0) for h in hits)
+        if confidence < MIN_CONFIDENCE:
+            return AnswerResult(
+                question=question,
+                answer=(
+                    "证据不足：知识库中检索到的内容与问题相关性过低"
+                    f"（最高相关度 {confidence:.2f}），不作答以免误导。"
+                ),
+                insufficient=True,
+                confidence=confidence,
+            )
+
         evidence = build_evidence(hits)
         ev_text = render_evidence(evidence)
         messages = [
@@ -161,6 +180,7 @@ class GroundedAnswerer:
             insufficient=insufficient,
             invalid_markers=invalid,
             evidence_used=len(valid),
+            confidence=confidence,
         )
 
 

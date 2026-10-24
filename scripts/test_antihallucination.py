@@ -116,6 +116,20 @@ def main() -> int:
     ans = GroundedAnswerer(FakeRetriever([]), ScriptedLLM(["不该被调用"])).ask("任意问题")
     check("空检索直接拒答", ans.insufficient and ans.evidence_used == 0)
 
+    # 8b) 相关性闸门：证据相关度过低时必须拒答，而不是拿无关原文配合法锚点
+    weak_hits = [dict(FAKE_HITS[0], score=-7.5)]
+    ans = GroundedAnswerer(FakeRetriever(weak_hits), ScriptedLLM(["作者拿过两次图灵奖 [E1]。"])).ask(
+        "这篇论文的作者获得过几次图灵奖？"
+    )
+    check("低相关度拒答", ans.insufficient, f"insufficient={ans.insufficient}")
+    check("低相关度不产生答案", "证据不足" in ans.answer, ans.answer[:60])
+    check("低相关度记录置信度", ans.confidence == -7.5, str(ans.confidence))
+
+    # 8c) 相关性足够时闸门放行
+    strong_hits = [dict(FAKE_HITS[0], score=2.2)]
+    ans = GroundedAnswerer(FakeRetriever(strong_hits), ScriptedLLM(["8 块 P100 [E1]。"])).ask("多少 GPU？")
+    check("高相关度放行", ans.grounded, f"grounded={ans.grounded}")
+
     # 9) 数字一致性：证据里没有 16，应报可疑
     suspicious = numeric_consistency("模型用了 16 块 GPU [E1]。", ev)
     check("可疑数字被抓出", "16" in suspicious, f"suspicious={suspicious}")

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -55,7 +56,10 @@ class Store:
     def __init__(self, path: Path | None = None) -> None:
         self.path = Path(path) if path else INDEX_DIR / "evidence.db"
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path)
+        # FastAPI 的 run_in_threadpool 会让同一连接跨线程使用，
+        # 因此放开线程检查，并用一把写锁串行化写入（WAL 下读不阻塞）。
+        self.conn = sqlite3.connect(self.path, check_same_thread=False)
+        self._lock = threading.Lock()
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.executescript(SCHEMA)
@@ -63,6 +67,10 @@ class Store:
 
     # ---------- 写入 ----------
     def upsert_paper(self, paper: Paper, chunks: list[Chunk]) -> None:
+        with self._lock:
+            self._upsert_paper_locked(paper, chunks)
+
+    def _upsert_paper_locked(self, paper: Paper, chunks: list[Chunk]) -> None:
         cur = self.conn.cursor()
         cur.execute(
             "INSERT OR REPLACE INTO papers "
@@ -99,23 +107,29 @@ class Store:
         self.conn.commit()
 
     def save_vectors(self, chunk_ids: list[str], matrix: np.ndarray) -> None:
-        self.conn.executemany(
-            "INSERT OR REPLACE INTO vectors (chunk_id, vec) VALUES (?,?)",
-            [(cid, matrix[i].astype(np.float32).tobytes()) for i, cid in enumerate(chunk_ids)],
-        )
-        self.conn.commit()
+        with self._lock:
+            self.conn.executemany(
+                "INSERT OR REPLACE INTO vectors (chunk_id, vec) VALUES (?,?)",
+                [
+                    (cid, matrix[i].astype(np.float32).tobytes())
+                    for i, cid in enumerate(chunk_ids)
+                ],
+            )
+            self.conn.commit()
 
     def delete_paper(self, paper_id: str) -> None:
-        self.conn.execute("DELETE FROM chunks WHERE paper_id=?", (paper_id,))
-        self.conn.execute("DELETE FROM vectors WHERE chunk_id LIKE ?", (f"{paper_id}#%",))
-        self.conn.execute("DELETE FROM papers WHERE id=?", (paper_id,))
-        self.conn.commit()
+        with self._lock:
+            self.conn.execute("DELETE FROM chunks WHERE paper_id=?", (paper_id,))
+            self.conn.execute("DELETE FROM vectors WHERE chunk_id LIKE ?", (f"{paper_id}#%",))
+            self.conn.execute("DELETE FROM papers WHERE id=?", (paper_id,))
+            self.conn.commit()
 
     # ---------- 读取 ----------
     def list_papers(self) -> list[dict]:
-        rows = self.conn.execute(
-            "SELECT id,title,filename,page_count,arxiv_id,chunk_count FROM papers ORDER BY id"
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id,title,filename,page_count,arxiv_id,chunk_count FROM papers ORDER BY id"
+            ).fetchall()
         return [
             {
                 "id": r[0],
@@ -129,10 +143,11 @@ class Store:
         ]
 
     def load_chunks(self) -> list[dict]:
-        rows = self.conn.execute(
-            "SELECT id,paper_id,idx,text,section_path,section_title,page_start,page_end,bbox "
-            "FROM chunks ORDER BY paper_id, idx"
-        ).fetchall()
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id,paper_id,idx,text,section_path,section_title,page_start,page_end,bbox "
+                "FROM chunks ORDER BY paper_id, idx"
+            ).fetchall()
         out = []
         for r in rows:
             out.append(
@@ -151,7 +166,8 @@ class Store:
         return out
 
     def load_vectors(self) -> tuple[list[str], np.ndarray]:
-        rows = self.conn.execute("SELECT chunk_id, vec FROM vectors").fetchall()
+        with self._lock:
+            rows = self.conn.execute("SELECT chunk_id, vec FROM vectors").fetchall()
         if not rows:
             return [], np.zeros((0, 0), dtype=np.float32)
         ids = [r[0] for r in rows]

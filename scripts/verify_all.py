@@ -33,10 +33,16 @@ CHECKS = [
         "covers": "模块二",
     },
     {
-        "name": "抗幻觉 Guardrails（编号校验/修复/拒答）",
+        "name": "抗幻觉 Guardrails（编号校验/相关性闸门/拒答）",
         "script": "test_antihallucination.py",
         "heavy": False,
         "covers": "模块二",
+    },
+    {
+        "name": "服务层接口（健康/检索/问答/SSE/拒答）",
+        "script": "test_api.py",
+        "heavy": True,
+        "covers": "闭环",
     },
 ]
 

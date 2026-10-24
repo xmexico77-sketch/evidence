@@ -42,7 +42,9 @@ def main() -> int:
         print(f"A: {res.answer}")
         print(f"   [{flag}] 引用 {res.evidence_used} 条 · 修复={res.repaired} · 无效编号={res.invalid_markers}")
         for c in res.citations:
-            print(f"   {c['marker']} {c['anchor']['label']}  bbox={c['anchor']['bbox']}")
+            score = c.get("score")
+            score_txt = f" score={score:+.3f}" if isinstance(score, (int, float)) else ""
+            print(f"   {c['marker']} {c['anchor']['label']}{score_txt}  bbox={c['anchor']['bbox']}")
             print(f"        {c['snippet'][:100]}…")
         print()
         if not res.grounded and not res.insufficient:
