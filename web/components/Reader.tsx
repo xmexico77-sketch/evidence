@@ -6,7 +6,7 @@ import ParaPane from "@/components/ParaPane";
 import PdfViewer, { type ScrollProgress } from "@/components/PdfViewer";
 import { Sidebar } from "@/components/Nav";
 import { Empty, ErrorCard } from "@/components/ui";
-import type { OutlineItem, Paragraph } from "@/lib/types";
+import type { AnswerResult, OutlineItem, Paragraph } from "@/lib/types";
 
 const SYNC_LOCK_MS = 700;
 
@@ -27,6 +27,11 @@ export default function Reader({
 
   const [focusPage, setFocusPage] = useState<number | null>(initialPage ?? null);
   const [current, setCurrent] = useState(initialPage ?? 1);
+  // 就本篇提问：API 已支持 paper_id 限定，这里把它接上界面。
+  // 库里 22 篇时，"用了多少 GPU"有多个合理答案，限定范围才是用户真正想要的。
+  const [askQ, setAskQ] = useState("");
+  const [askBusy, setAskBusy] = useState(false);
+  const [askResult, setAskResult] = useState<AnswerResult | null>(null);
   const [pdfTarget, setPdfTarget] = useState<ScrollProgress | null>(null);
   const [paraTarget, setParaTarget] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -126,6 +131,26 @@ export default function Reader({
     }
   }, [byPage, current, paperId]);
 
+  const askThisPaper = useCallback(async () => {
+    const q = askQ.trim();
+    if (!q || askBusy) return;
+    setAskBusy(true);
+    setAskResult(null);
+    try {
+      const res = await fetch("/api/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q, top_k: 5, paper_id: paperId }),
+      });
+      if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+      setAskResult((await res.json()) as AnswerResult);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAskBusy(false);
+    }
+  }, [askQ, askBusy, paperId]);
+
   const highlights =
     initialPage && initialBox ? [{ page: initialPage, bbox: initialBox }] : [];
 
@@ -164,6 +189,66 @@ export default function Reader({
           <span className="pill mono">{outline.length} 个标题 · 当前 p{current}</span>
           <span className="pill mono">{paragraphs.length} 段</span>
         </div>
+
+        <div className="ask-box" style={{ marginBottom: 10 }}>
+          <input
+            value={askQ}
+            onChange={(e) => setAskQ(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void askThisPaper();
+            }}
+            placeholder="就本篇提问，例如：训练用了多少块 GPU？"
+          />
+          <button onClick={() => void askThisPaper()} disabled={askBusy || !askQ.trim()}>
+            {askBusy ? "检索中…" : "提问"}
+          </button>
+          {askResult && (
+            <button
+              onClick={() => setAskResult(null)}
+              style={{ background: "transparent", color: "var(--fg-dim)", borderColor: "var(--line)" }}
+            >
+              收起
+            </button>
+          )}
+        </div>
+
+        {askResult && (
+          <div className="card" style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+              <span className={`pill ${askResult.grounded ? "ok" : "warn"}`}>
+                {askResult.grounded ? "有据" : askResult.insufficient ? "拒答" : "未通过校验"}
+              </span>
+              <span className="pill mono">置信度 {askResult.confidence.toFixed(2)}</span>
+              <span className="pill mono">仅限本篇</span>
+            </div>
+            <div className="answer" style={{ fontSize: 13.5 }}>
+              {askResult.answer}
+            </div>
+            {askResult.citations.length > 0 && (
+              <div className="cite-list">
+                {askResult.citations.map((c) => (
+                  <div className="cite" key={c.marker}>
+                    <div className="top">
+                      <strong style={{ color: "var(--accent)" }}>{c.marker}</strong>
+                      <span>{c.anchor.label}</span>
+                      <button
+                        className="pill"
+                        style={{ marginLeft: "auto", background: "transparent" }}
+                        onClick={() => {
+                          setFocusPage(c.anchor.page);
+                          setPdfTarget({ page: c.anchor.page, ratio: 0 });
+                        }}
+                      >
+                        定位 →
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="reader-split">
           <PdfViewer
             paperId={paperId}

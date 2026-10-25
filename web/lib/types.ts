@@ -150,3 +150,6 @@ export type AskResponse = {
   citations: Citation[];
   confidence: number;
 };
+
+/** 阅读器里的「就本篇提问」复用同一个返回结构。 */
+export type AnswerResult = AskResponse;
