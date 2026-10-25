@@ -24,6 +24,9 @@ data/pdf/
 data/parsed/
 data/index/
 data/figures/
+# 长文档压测件（507 页 / 38MB），由 fetch_longdoc.py 生成，
+# 刻意放在 pdf/ 之外，避免被 index_cli 当成正式文献索引进演示库
+data/longdoc/
 
 # --- 产出物 ---
 dist/

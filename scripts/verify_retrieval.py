@@ -31,11 +31,14 @@ def main() -> int:
     retriever.build_bm25()
 
     failures = 0
+    # 这些事实都出自同一篇论文，因此按论文限定检索。
+    # 库里 22 篇论文时，"训练用了多少块 GPU"会有多个合理答案（Longformer 是 V100，
+    # Transformer 是 P100），不限定范围就会答成另一篇——技术上不错但不是用户问的。
+    scope = {"1706.03762v1"}
     for query, needle, section_hint in CASES:
-        hits = retriever.search(query, top_k=5)
+        hits = retriever.search(query, top_k=5, paper_filter=scope)
         blob = " ".join(h["text"] for h in hits).lower()
         found = needle in blob
-        # 命中位置：是否出现在 top-3
         top3 = " ".join(h["text"] for h in hits[:3]).lower()
         in_top3 = needle in top3
         best = hits[0]["anchor"]["label"] if hits else "无命中"
@@ -46,10 +49,21 @@ def main() -> int:
         print(f"       期望 {needle!r} | top3命中={in_top3} | 最佳锚点 {best}")
         if hits:
             print(f"       {hits[0]['text'][:130]}…")
-    if failures:
-        print(f"\n{failures}/{len(CASES)} 条检索失败")
+
+    # 跨论文检索：不限定时应能找到另一篇论文里的事实
+    cross_hits = retriever.search("用了什么型号的 GPU 做实验？", top_k=5)
+    cross_papers = {h["paper_id"] for h in cross_hits}
+    if len(cross_papers) >= 2:
+        print(f"[PASS] 跨论文检索 | 命中 {len(cross_papers)} 篇不同论文：{sorted(cross_papers)[:3]}")
     else:
-        print(f"\n全部 {len(CASES)} 条中文查询均命中英文论文事实")
+        failures += 1
+        print(f"[FAIL] 跨论文检索 | 只命中 {sorted(cross_papers)}")
+
+    total = len(CASES) + 1
+    if failures:
+        print(f"\n{failures}/{total} 条检索失败")
+    else:
+        print(f"\n全部 {total} 项检索通过（6 条单篇事实 + 1 条跨论文）")
     store.close()
     return 1 if failures else 0
 

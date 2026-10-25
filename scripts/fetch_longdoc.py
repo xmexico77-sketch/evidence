@@ -17,7 +17,8 @@ import pymupdf
 
 ROOT = Path(__file__).resolve().parent.parent
 PDF_DIR = ROOT / "data" / "pdf"
-TARGET = PDF_DIR / "longdoc.pdf"
+LONG_DIR = ROOT / "data" / "longdoc"
+TARGET = LONG_DIR / "longdoc.pdf"
 MIN_PAGES = 500
 
 CANDIDATE_PAGES = [
@@ -84,6 +85,7 @@ def synth_longdoc() -> Path:
 
 def main() -> int:
     PDF_DIR.mkdir(parents=True, exist_ok=True)
+    LONG_DIR.mkdir(parents=True, exist_ok=True)
     if TARGET.exists():
         with pymupdf.open(TARGET) as doc:
             if doc.page_count >= MIN_PAGES:

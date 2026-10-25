@@ -110,6 +110,9 @@ class SearchHit(BaseModel):
 class AskRequest(BaseModel):
     question: str = Field(min_length=1, max_length=500)
     top_k: int = Field(default=5, ge=1, le=12)
+    # 可选：把问题限定在某篇论文内。库大了之后同一个问题可能有多个合理答案，
+    # 不限定范围就会答成另一篇论文的数值——技术上不错，但不是用户问的。
+    paper_id: str | None = None
 
 
 class AskResponse(BaseModel):
@@ -588,7 +591,8 @@ async def search(req: AskRequest) -> list[SearchHit]:
 @app.post("/api/ask", response_model=AskResponse)
 async def ask(req: AskRequest) -> AskResponse:
     state = get_state()
-    result = await run_in_threadpool(state["answerer"].ask, req.question, req.top_k)
+    scope = {req.paper_id} if req.paper_id else None
+    result = await run_in_threadpool(state["answerer"].ask, req.question, req.top_k, scope)
     return AskResponse(**result.to_dict())
 
 
@@ -600,9 +604,12 @@ async def ask_stream(req: AskRequest) -> StreamingResponse:
     （DeepSeekClient.stream 已就绪），此处保留同一条事件协议，前端不用改。
     """
     state = get_state()
+    scope = {req.paper_id} if req.paper_id else None
 
     async def gen():
-        result = await run_in_threadpool(state["answerer"].ask, req.question, req.top_k)
+        result = await run_in_threadpool(
+            state["answerer"].ask, req.question, req.top_k, scope
+        )
         yield _sse({"type": "answer", "delta": result.answer})
         yield _sse(
             {

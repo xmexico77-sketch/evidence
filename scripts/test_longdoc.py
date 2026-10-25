@@ -23,7 +23,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 from app.indexing.chunker import build_chunks, chunk_stats  # noqa: E402
 from app.parsing import parse_pdf, summary  # noqa: E402
 
-DOC = ROOT / "data" / "pdf" / "longdoc.pdf"
+DOC = ROOT / "data" / "longdoc" / "longdoc.pdf"
 
 MAX_PARSE_SEC = 360.0  # 与文档承诺的"冷启动解析 ≤6 分钟"一致（实测 507 页约 335s）
 MAX_PEAK_MB = 2000.0
