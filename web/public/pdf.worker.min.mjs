@@ -1,4 +1,4 @@
-/**
+/*polyfill*/if(typeof Promise!=="undefined"&&typeof Promise.withResolvers!=="function"){Promise.withResolvers=function(){let a,b;const p=new Promise((res,rej)=>{a=res;b=rej});return{promise:p,resolve:a,reject:b}};}/**
  * @licstart The following is the entire license notice for the
  * JavaScript code in this page
  *

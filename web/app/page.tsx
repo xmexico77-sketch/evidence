@@ -12,6 +12,16 @@ const SAMPLES = [
   "Transformer 的多头注意力有几个头？",
 ];
 
+/** 首页空态的入口卡片：让第一次打开的人知道这套系统能做什么。 */
+const CAPABILITIES = [
+  { tag: "模块一", title: "版式保真阅读", desc: "双栏重建、标题树、图表定位，段落级坐标", href: "/paper/1706.03762v1" },
+  { tag: "模块二", title: "抗幻觉问答", desc: "三道闸门，答不出就拒答，不编造", href: "/" },
+  { tag: "模块五", title: "引用图谱", desc: "基石论文识别、社区划分、自动综述", href: "/graph" },
+  { tag: "模块四", title: "论文发现", desc: "arXiv 检索与追踪，可复现性加权推荐", href: "/discover" },
+  { tag: "模块六", title: "写作与图表", desc: "CSV 出学术图表，提纲与草稿带引用核验", href: "/write" },
+  { tag: "模块三", title: "双语联动", desc: "原文与译文共享段落锚点，滚动对齐", href: "/paper/1706.03762v1" },
+];
+
 export default function Workbench() {
   const [health, setHealth] = useState<Health | null>(null);
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -136,6 +146,29 @@ export default function Workbench() {
           <div className="card" style={{ borderColor: "#4d2424", color: "var(--bad)" }}>
             {error}
           </div>
+        )}
+
+        {!result && !busy && (
+          <>
+            <p className="section-title" style={{ marginTop: 6 }}>
+              六大模块 · 点进任一入口
+            </p>
+            <div className="cap-grid">
+              {CAPABILITIES.map((c) => (
+                <Link key={c.href} href={c.href} className="cap-card">
+                  <span className="cap-tag mono">{c.tag}</span>
+                  <strong>{c.title}</strong>
+                  <span className="dim" style={{ fontSize: 12, lineHeight: 1.6 }}>
+                    {c.desc}
+                  </span>
+                </Link>
+              ))}
+            </div>
+            <p className="faint" style={{ fontSize: 11.5, marginTop: 14 }}>
+              每个结论都带页级锚点：答案里的 [E1] 可点回原文具体段落，
+              标记校验不通过的内容不会输出。
+            </p>
+          </>
         )}
 
         {result && (

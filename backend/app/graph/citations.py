@@ -209,7 +209,10 @@ def to_cytoscape(works: dict[str, Work], g: nx.DiGraph) -> dict:
         {
             "data": {
                 "id": w.key,
-                "label": w.title[:48] or w.key,
+                # 标签过长会在图中央互相压字（实测截图里挤成一团），截到 34 字；
+                # 完整标题放在 full_title 里，右侧详情面板显示原文
+                "label": (w.title[:34] + "…") if len(w.title) > 34 else (w.title or w.key),
+                "full_title": w.title,
                 "year": w.year,
                 "pagerank": w.pagerank,
                 "betweenness": w.betweenness,

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 import time
@@ -271,14 +272,24 @@ class Store:
         return out
 
     def load_paragraphs(self, paper_id: str) -> list[dict]:
-        """段落级正文 + 坐标。双语侧栏与联动滚动都靠它。"""
+        """段落级正文 + 坐标。双语侧栏与联动滚动都靠它。
+
+        开头要做一次裁剪：论文首页的标题、作者列表、单位、邮箱、脚注
+        都会被切成独立小块，直接铺进右侧栏会出现"Attention Is All You
+        Need / Ashish Vaswani*"刷屏——实测首屏 12 行里 9 行是作者信息，
+        正文反而被挤到下面。这里从摘要（或第一个编号章节）开始截取。
+        """
         with self._lock:
             rows = self.conn.execute(
                 "SELECT id,page,bbox,section,text,order_idx FROM blocks "
                 "WHERE paper_id=? ORDER BY order_idx",
                 (paper_id,),
             ).fetchall()
-        return [
+            headings = self.conn.execute(
+                "SELECT text FROM headings WHERE paper_id=? ORDER BY page",
+                (paper_id,),
+            ).fetchall()
+        items = [
             {
                 "id": r[0],
                 "page": r[1],
@@ -290,6 +301,7 @@ class Store:
             for r in rows
             if (r[4] or "").strip()
         ]
+        return _trim_front_matter(items, [h[0] or "" for h in headings])
 
     def load_translations(self, paper_id: str, lang: str) -> dict[str, str]:
         with self._lock:
@@ -507,3 +519,43 @@ class Store:
 
     def close(self) -> None:
         self.conn.close()
+
+# 摘要之前的内容一律不进入右侧栏：标题、作者、单位、邮箱、脚注
+_EMAIL_RE = re.compile(r"[\w.\-]+@[\w\-]+\.[\w.\-]+")
+
+
+def _trim_front_matter(items: list[dict], headings: list[str]) -> list[dict]:
+    """去掉正文前的标题/作者/单位块，从摘要或第一个编号章节开始。
+
+    找不到摘要标题时退化为"跳过前 3 个块"，避免把首页元数据全铺出来。
+    """
+    if not items:
+        return items
+    start = 0
+    for i, h in enumerate(items):
+        text = (h.get("text") or "").strip()
+        low = text.lower()
+        if low.startswith("abstract") or text.startswith("摘要"):
+            start = i
+            break
+        if re.match(r"^\d{1,2}\s+[A-Z]", text):
+            start = i
+            break
+    else:
+        start = min(3, len(items))
+
+    # 标题块自身也会出现在 blocks 里，右侧栏不需要重复一遍。
+    # 注意两边的文本形态不一致：headings 存 "Introduction"，block 存 "1 Introduction"，
+    # 所以比较前要剥掉编号。
+    def _norm(text: str) -> str:
+        return re.sub(r"^\s*\d+(?:\.\d+)*\s*", "", text.strip()).lower()
+
+    heading_set = {_norm(h) for h in headings if h}
+    kept = [
+        it
+        for it in items[start:]
+        if not _EMAIL_RE.search(it["text"])
+        and len(it["text"].strip()) >= 12
+        and _norm(it["text"]) not in heading_set
+    ]
+    return kept or items

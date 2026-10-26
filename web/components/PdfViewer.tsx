@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
+import { ensureModernJsPolyfills } from "@/lib/polyfill";
 
 export type HighlightBox = { page: number; bbox: number[] };
 export type ScrollProgress = { page: number; ratio: number };
@@ -91,6 +92,9 @@ export default function PdfViewer({
     (async () => {
       setStatus("loading");
       try {
+        // 必须在加载 pdfjs 之前补原语：pdfjs-dist 4.x 用了
+        // Promise.withResolvers（Edge/Chrome 119+），旧浏览器会直接报错、画布空白
+        ensureModernJsPolyfills();
         const pdfjs = await import("pdfjs-dist");
         pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
         const pdf = await pdfjs.getDocument(`/api/papers/${paperId}/file`).promise;

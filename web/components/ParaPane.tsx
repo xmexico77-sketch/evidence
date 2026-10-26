@@ -8,6 +8,8 @@ type Props = {
   translations: Record<string, string>;
   translateEnabled: boolean;
   translatePending: number;
+  /** 真调用过翻译接口且返回 enabled=false 时为 true */
+  translateUnavailable?: boolean;
   /** 外部驱动的锚点滚动目标 */
   targetId?: string | null;
   /** 用户滚动时回报顶部段落 */
@@ -21,6 +23,7 @@ export default function ParaPane({
   translations,
   translateEnabled,
   translatePending,
+  translateUnavailable = false,
   targetId = null,
   onProgress,
   onRequestTranslate,
@@ -72,11 +75,13 @@ export default function ParaPane({
     <div className="para-pane">
       <div className="para-head">
         <span>双语对照</span>
-        {translateEnabled ? (
-          <button className="pill" onClick={onRequestTranslate}>
-            翻译本页{translateHint(translatePending)}
-          </button>
-        ) : (
+        {/* 之前这里按 translateEnabled 显示"未配置模型"，但该标志只在
+            首次调用后才变 true——配了模型也一直显示"未配置"。
+            改为：按钮常驻，只有在真调用过且返回 enabled=false 时才提示不可用。 */}
+        <button className="pill" onClick={onRequestTranslate}>
+          翻译本页{translateHint(translatePending)}
+        </button>
+        {!translateEnabled && translateUnavailable && (
           <span className="pill warn">未配置模型 · 仅显示原文</span>
         )}
       </div>

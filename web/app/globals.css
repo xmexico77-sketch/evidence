@@ -98,6 +98,38 @@ button {
   padding: 14px 16px;
 }
 
+/* 首页空态的能力入口 */
+.cap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+.cap-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 13px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-soft);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.cap-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+.cap-tag {
+  font-size: 10.5px;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+.cap-card strong {
+  font-size: 14px;
+}
+
 .pill {
   display: inline-flex;
   align-items: center;
@@ -108,6 +140,9 @@ button {
   font-family: var(--mono);
   border: 1px solid var(--line);
   color: var(--fg-dim);
+  /* <button class="pill"> 会套用浏览器默认浅色背景，在深色主题里像一块白砖。
+     统一透明底；需要底色的 .ok/.warn/.bad 在下面覆盖。 */
+  background: transparent;
 }
 .pill.ok {
   color: var(--ok);

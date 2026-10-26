@@ -23,6 +23,7 @@ export default function Reader({
   const [paragraphs, setParagraphs] = useState<Paragraph[]>([]);
   const [translations, setTranslations] = useState<Record<string, string>>({});
   const [translateEnabled, setTranslateEnabled] = useState(false);
+  const [translateUnavailable, setTranslateUnavailable] = useState(false);
   const [pending, setPending] = useState(0);
 
   const [focusPage, setFocusPage] = useState<number | null>(initialPage ?? null);
@@ -125,6 +126,9 @@ export default function Reader({
       if (data.enabled) {
         setTranslations((prev) => ({ ...prev, ...data.translations }));
         setPending(data.pending ?? 0);
+        setTranslateUnavailable(false);
+      } else {
+        setTranslateUnavailable(true);
       }
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -262,6 +266,7 @@ export default function Reader({
             paragraphs={paragraphs}
             translations={translations}
             translateEnabled={translateEnabled}
+            translateUnavailable={translateUnavailable}
             translatePending={pending}
             targetId={paraTarget}
             onProgress={onParaProgress}
