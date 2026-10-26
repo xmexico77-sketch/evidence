@@ -22,7 +22,8 @@ export default function DiscoverPage() {
     async (nextMode: "search" | "track") => {
       setBusy(true);
       setErr(null);
-      setNote("正在检索 arXiv 并补全开源实现信息，约需 10–30 秒…");
+      // 进度提示统一交给 <Loading>，这里不再重复塞一条 note
+      setNote(null);
       try {
         const params = new URLSearchParams({
           category,

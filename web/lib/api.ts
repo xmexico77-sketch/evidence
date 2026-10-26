@@ -18,9 +18,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export const api = {
   health: () => request<import("./types").Health>("/api/health"),
   papers: () => request<{ papers: import("./types").Paper[] }>("/api/papers"),
-  ask: (question: string, topK = 5) =>
+  ask: (question: string, topK = 5, paperId?: string) =>
     request<import("./types").AskResponse>("/api/ask", {
       method: "POST",
-      body: JSON.stringify({ question, top_k: topK }),
+      body: JSON.stringify({ question, top_k: topK, paper_id: paperId ?? null }),
+    }),
+  compare: (dimension: string, paperIds: [string, string], topK = 4) =>
+    request<{
+      answer: string;
+      grounded: boolean;
+      citations: { marker: string; anchor: import("./types").Anchor }[];
+      invalid_markers: number[];
+    }>("/api/compare", {
+      method: "POST",
+      body: JSON.stringify({ dimension, paper_ids: paperIds, top_k: topK }),
     }),
 };

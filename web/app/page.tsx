@@ -28,6 +28,8 @@ export default function Workbench() {
   const [offline, setOffline] = useState<string | null>(null);
   const [question, setQuestion] = useState(SAMPLES[0]);
   const [result, setResult] = useState<AskResponse | null>(null);
+  // 限定论文：库里多篇论文都会谈"GPU 型号"这类事实，不限定就答成别篇
+  const [scope, setScope] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,13 +51,13 @@ export default function Workbench() {
     setBusy(true);
     setError(null);
     try {
-      setResult(await api.ask(q));
+      setResult(await api.ask(q, 5, scope || undefined));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  }, [question, busy]);
+  }, [question, busy, scope]);
 
   return (
     <div className="shell">
@@ -116,6 +118,19 @@ export default function Workbench() {
         )}
 
         <div className="ask-box">
+          <select
+            className="scope-select"
+            value={scope}
+            onChange={(e) => setScope(e.target.value)}
+            title="限定在某篇论文内提问；不限定则跨全库检索"
+          >
+            <option value="">全部文献</option>
+            {papers.map((p) => (
+              <option key={p.id} value={p.id}>
+                {(p.title || p.id).slice(0, 42)}
+              </option>
+            ))}
+          </select>
           <input
             value={question}
             onChange={(e) => setQuestion(e.target.value)}

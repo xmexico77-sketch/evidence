@@ -98,6 +98,23 @@ button {
   padding: 14px 16px;
 }
 
+/* 限定论文下拉：与输入框同高，深色底 */
+.scope-select {
+  flex: 0 0 auto;
+  max-width: 250px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-soft);
+  color: var(--fg);
+  font-size: 12.5px;
+  font-family: inherit;
+  outline: none;
+}
+.scope-select:focus {
+  border-color: var(--accent);
+}
+
 /* 首页空态的能力入口 */
 .cap-grid {
   display: grid;

@@ -106,6 +106,13 @@ class Session:
                 return msg.get("result", {})
         raise TimeoutError(method)
 
+    def evaluate(self, expr: str, timeout: float = 20) -> dict:
+        return self.send(
+            "Runtime.evaluate",
+            {"expression": expr, "awaitPromise": True, "returnByValue": True},
+            timeout=timeout,
+        )
+
     def close(self) -> None:
         try:
             self.ws.close()
@@ -114,7 +121,7 @@ class Session:
 
 
 def capture(browser: str, port: int, pages: list[tuple[str, str]], out_dir: Path,
-            width: int, height: int, wait_ms: int) -> int:
+            width: int, height: int, wait_ms: int, steps: list[dict] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     profile = ROOT / ".cache" / f"edge-shot-{port}"
     proc = subprocess.Popen(
@@ -134,23 +141,40 @@ def capture(browser: str, port: int, pages: list[tuple[str, str]], out_dir: Path
         stderr=subprocess.DEVNULL,
     )
     ok = 0
+    shots = 0
     try:
-        ws_url = wait_devtools(port)
+        wait_devtools(port)
         ws_url = page_target(port)
         sess = Session(ws_url)
         sess.send("Page.enable")
+        sess.send("Runtime.enable")
         sess.send("Emulation.setDeviceMetricsOverride",
                   {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False})
-        for name, url in pages:
-            sess.send("Page.navigate", {"url": url})
-            time.sleep(wait_ms / 1000)
+
+        def shoot(name: str) -> None:
+            nonlocal shots
             shot = sess.send("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": False})
             target = out_dir / f"{name}.png"
             target.write_bytes(base64.b64decode(shot["data"]))
-            size_kb = target.stat().st_size / 1024
-            print(f"  {name:<10} {url:<48} {size_kb:6.0f} KB")
-            if size_kb > 5:
+            print(f"  [shot] {name:<28} {target.stat().st_size / 1024:6.0f} KB")
+            shots += 1
+
+        for name, url in pages:
+            sess.send("Page.navigate", {"url": url})
+            time.sleep(wait_ms / 1000)
+            print(f"  [page] {name:<10} {url}")
+            if not steps:
+                shoot(name)
                 ok += 1
+                continue
+            ok += 1
+            for step in steps:
+                if "wait" in step:
+                    time.sleep(float(step["wait"]) / 1000)
+                elif "eval" in step:
+                    sess.evaluate(step["eval"])
+                elif "shot" in step:
+                    shoot(step["shot"])
         sess.close()
     finally:
         proc.terminate()
@@ -158,7 +182,7 @@ def capture(browser: str, port: int, pages: list[tuple[str, str]], out_dir: Path
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
-    return ok
+    return ok if not steps else shots
 
 
 def main() -> int:
@@ -168,16 +192,25 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=9333)
     ap.add_argument("--width", type=int, default=1600)
     ap.add_argument("--height", type=int, default=1000)
+    ap.add_argument("--js", help="JSON 步骤数组：{\"eval\":expr}/{\"wait\":ms}/{\"shot\":name}")
+    ap.add_argument("--js-file", help="同上，但从文件读（Windows 下命令行传引号会被吞）")
     ap.add_argument("--wait-ms", type=int, default=3500, help="每页等待渲染的时间")
     args = ap.parse_args()
 
     pages = [("page", args.url)] if args.url else DEFAULT_PAGES
     out_dir = (ROOT / args.out) if not Path(args.out).is_absolute() else Path(args.out)
     browser = find_browser()
+    steps = None
+    if args.js_file:
+        steps = json.loads(Path(args.js_file).read_text(encoding="utf-8"))
+    elif args.js:
+        steps = json.loads(args.js)
     print(f"浏览器：{browser}\n输出：{out_dir}")
-    ok = capture(browser, args.port, pages, out_dir, args.width, args.height, args.wait_ms)
-    print(f"\n{ok}/{len(pages)} 页截图成功")
-    return 0 if ok == len(pages) else 1
+    ok = capture(browser, args.port, pages, out_dir, args.width, args.height, args.wait_ms, steps)
+    unit = "张截图" if steps else "页截图"
+    total = len(steps and [s for s in steps if "shot" in s]) or len(pages)
+    print(f"\n{ok}/{total} {unit}成功")
+    return 0 if ok == total else 1
 
 
 if __name__ == "__main__":

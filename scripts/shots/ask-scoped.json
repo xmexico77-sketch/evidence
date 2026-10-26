@@ -1,0 +1,15 @@
+[
+  {
+    "eval": "(()=>{const s=document.querySelector('.scope-select');if(!s)return 'NO SELECT';s.value='1706.03762v1';s.dispatchEvent(new Event('change',{bubbles:true}));return s.value})()"
+  },
+  { "wait": 600 },
+  {
+    "eval": "(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes('GPU'));if(b){b.click();return b.textContent}return 'NONE'})()"
+  },
+  { "wait": 400 },
+  {
+    "eval": "(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='提问');if(b){b.click();return 'clicked'}return 'NONE'})()"
+  },
+  { "wait": 14000 },
+  { "shot": "ask-scoped" }
+]
