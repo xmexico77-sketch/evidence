@@ -1,0 +1,19 @@
+[
+  {
+    "eval": "(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='跨篇对比');if(b){b.click();return 'mode=compare'}return 'NONE'})()"
+  },
+  { "wait": 700 },
+  {
+    "eval": "(()=>{const s=[...document.querySelectorAll('.scope-select')];if(s.length<2)return 'NO SELECTS';s[0].value='1706.03762v1';s[0].dispatchEvent(new Event('change',{bubbles:true}));s[1].value='1810.04805';s[1].dispatchEvent(new Event('change',{bubbles:true}));return s[0].value+' vs '+s[1].value})()"
+  },
+  { "wait": 600 },
+  {
+    "eval": "(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes('自注意力机制'));if(b){b.click();return b.textContent}return 'NONE'})()"
+  },
+  { "wait": 500 },
+  {
+    "eval": "(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='对比');if(b){b.click();return 'clicked'}return 'NONE'})()"
+  },
+  { "wait": 20000 },
+  { "shot": "compare-result" }
+]

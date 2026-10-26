@@ -98,6 +98,31 @@ button {
   padding: 14px 16px;
 }
 
+/* 跨篇对比返回的 Markdown 表格 */
+.md-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0 12px;
+  font-size: 12.5px;
+  line-height: 1.7;
+}
+.md-table th,
+.md-table td {
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.md-table th {
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--fg);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.md-table td {
+  color: var(--fg-dim);
+}
+
 /* 限定论文下拉：与输入框同高，深色底 */
 .scope-select {
   flex: 0 0 auto;

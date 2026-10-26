@@ -4,7 +4,74 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Sidebar } from "@/components/Nav";
 import { api } from "@/lib/api";
-import type { AskResponse, Health, Paper } from "@/lib/types";
+import type { Anchor, AskResponse, Health, Paper } from "@/lib/types";
+
+type CompareResult = {
+  answer: string;
+  grounded: boolean;
+  citations: { marker: string; anchor: Anchor }[];
+  invalid_markers: number[];
+};
+
+/** 把模型返回的 Markdown 表格渲染成真正的表格；非表格行按段落排出。 */
+function AnswerBlocks({ text }: { text: string }) {
+  const lines = text.split("\n").map((l) => l.trim());
+  const out: React.ReactNode[] = [];
+  let table: string[][] = [];
+
+  const flushTable = () => {
+    if (table.length === 0) return;
+    const rows = table.filter((cells) => !cells.every((c) => /^:?-{2,}:?$/.test(c)));
+    if (rows.length > 0) {
+      const [head, ...body] = rows;
+      out.push(
+        <table className="md-table" key={`t${out.length}`}>
+          <thead>
+            <tr>
+              {head.map((c, i) => (
+                <th key={i}>{c}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {body.map((r, i) => (
+              <tr key={i}>
+                {r.map((c, j) => (
+                  <td key={j}>{c}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>,
+      );
+    }
+    table = [];
+  };
+
+  for (const line of lines) {
+    if (line.startsWith("|")) {
+      const cells = line.replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+      table.push(cells);
+      continue;
+    }
+    flushTable();
+    if (line) {
+      out.push(
+        <p key={`p${out.length}`} style={{ margin: "6px 0", fontSize: 13.5, lineHeight: 1.75 }}>
+          {line}
+        </p>,
+      );
+    }
+  }
+  flushTable();
+  return <>{out}</>;
+}
+
+const DIMENSIONS = [
+  "自注意力机制与预训练目标的关系",
+  "模型规模的演化与计算成本",
+  "训练数据与归纳偏置的差异",
+];
 
 const SAMPLES = [
   "训练用了多少块 GPU，什么型号？",
@@ -30,6 +97,12 @@ export default function Workbench() {
   const [result, setResult] = useState<AskResponse | null>(null);
   // 限定论文：库里多篇论文都会谈"GPU 型号"这类事实，不限定就答成别篇
   const [scope, setScope] = useState("");
+  // 跨篇对比（模块二"多篇论文跨文献对比"）
+  const [mode, setMode] = useState<"ask" | "compare">("ask");
+  const [pairA, setPairA] = useState("");
+  const [pairB, setPairB] = useState("");
+  const [compBusy, setCompBusy] = useState(false);
+  const [comp, setComp] = useState<CompareResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,6 +131,21 @@ export default function Workbench() {
       setBusy(false);
     }
   }, [question, busy, scope]);
+
+  const compare = useCallback(async () => {
+    if (!pairA || !pairB || pairA === pairB) return;
+    const dimension = question.trim();
+    if (!dimension) return;
+    setCompBusy(true);
+    setError(null);
+    try {
+      setComp(await api.compare(dimension, [pairA, pairB]));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCompBusy(false);
+    }
+  }, [pairA, pairB, question]);
 
   return (
     <div className="shell">
@@ -117,45 +205,127 @@ export default function Workbench() {
           </div>
         )}
 
+        <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+          {(
+            [
+              ["ask", "文献问答"],
+              ["compare", "跨篇对比"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              className={`pill ${mode === key ? "ok" : ""}`}
+              onClick={() => setMode(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="ask-box">
-          <select
-            className="scope-select"
-            value={scope}
-            onChange={(e) => setScope(e.target.value)}
-            title="限定在某篇论文内提问；不限定则跨全库检索"
-          >
-            <option value="">全部文献</option>
-            {papers.map((p) => (
-              <option key={p.id} value={p.id}>
-                {(p.title || p.id).slice(0, 42)}
-              </option>
-            ))}
-          </select>
+          {mode === "ask" ? (
+            <select
+              className="scope-select"
+              value={scope}
+              onChange={(e) => setScope(e.target.value)}
+              title="限定在某篇论文内提问；不限定则跨全库检索"
+            >
+              <option value="">全部文献</option>
+              {papers.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {(p.title || p.id).slice(0, 42)}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <>
+              <select
+                className="scope-select"
+                value={pairA}
+                onChange={(e) => setPairA(e.target.value)}
+                title="对比对象 A"
+              >
+                <option value="">选论文 A</option>
+                {papers.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {(p.title || p.id).slice(0, 36)}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="scope-select"
+                value={pairB}
+                onChange={(e) => setPairB(e.target.value)}
+                title="对比对象 B"
+              >
+                <option value="">选论文 B</option>
+                {papers.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {(p.title || p.id).slice(0, 36)}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
           <input
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter") void ask();
+              if (e.key === "Enter") {
+                if (mode === "ask") void ask();
+                else void compare();
+              }
             }}
-            placeholder="用中文提问，检索英文论文…"
+            placeholder={
+              mode === "ask"
+                ? "用中文提问，检索英文论文…"
+                : "输入比较维度，例如：自注意力机制与预训练目标的关系"
+            }
           />
-          <button onClick={() => void ask()} disabled={busy || !question.trim()}>
-            {busy ? "检索中…" : "提问"}
+          <button
+            onClick={() => (mode === "ask" ? void ask() : void compare())}
+            disabled={
+              mode === "ask"
+                ? busy || !question.trim()
+                : compBusy || !question.trim() || !pairA || !pairB || pairA === pairB
+            }
+          >
+            {mode === "ask" ? (busy ? "检索中…" : "提问") : compBusy ? "对比中…" : "对比"}
           </button>
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
-          {SAMPLES.map((s) => (
-            <button
-              key={s}
-              className="pill"
-              style={{ background: "transparent" }}
-              onClick={() => setQuestion(s)}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
+        {mode === "ask" && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+            {SAMPLES.map((s) => (
+              <button
+                key={s}
+                className="pill"
+                style={{ background: "transparent" }}
+                onClick={() => setQuestion(s)}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {mode === "compare" && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 18 }}>
+            {DIMENSIONS.map((d) => (
+              <button
+                key={d}
+                className="pill"
+                style={{ background: "transparent" }}
+                onClick={() => setQuestion(d)}
+              >
+                {d}
+              </button>
+            ))}
+            {pairA && pairB && pairA === pairB && (
+              <span className="pill warn">两篇不能相同</span>
+            )}
+          </div>
+        )}
 
         {error && (
           <div className="card" style={{ borderColor: "#4d2424", color: "var(--bad)" }}>
@@ -163,7 +333,34 @@ export default function Workbench() {
           </div>
         )}
 
-        {!result && !busy && (
+        {mode === "compare" && comp && (
+          <div className="card" style={{ marginBottom: 14 }}>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+              <span className={`pill ${comp.grounded ? "ok" : "warn"}`}>
+                {comp.grounded ? "有据" : comp.invalid_markers.length ? "标记非法" : "未通过校验"}
+              </span>
+              <span className="pill mono">引用 {comp.citations.length}</span>
+              {comp.invalid_markers.length > 0 && (
+                <span className="pill bad">非法标记 {comp.invalid_markers.join(",")}</span>
+              )}
+            </div>
+            <AnswerBlocks text={comp.answer} />
+            {comp.citations.length > 0 && (
+              <div className="cite-list">
+                {comp.citations.map((c) => (
+                  <div className="cite" key={c.marker}>
+                    <div className="top">
+                      <strong style={{ color: "var(--accent)" }}>{c.marker}</strong>
+                      <span>{c.anchor.label}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {!result && !comp && !busy && !compBusy && (
           <>
             <p className="section-title" style={{ marginTop: 6 }}>
               六大模块 · 点进任一入口
