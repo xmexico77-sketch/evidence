@@ -43,7 +43,12 @@ def main() -> int:
         check("search 带锚点页码", isinstance(anchor.get("page"), int), str(anchor))
         check("search 带 bbox", len(anchor.get("bbox", [])) == 4, str(anchor))
 
-    r = client.post("/api/ask", json={"question": "训练用了多少块 GPU，什么型号？"})
+    # 库里多篇论文都有"GPU 型号"这类陈述，必须限定论文才有确定答案。
+    # 不限定时的行为由下面的"跨论文"用例单独覆盖。
+    r = client.post(
+        "/api/ask",
+        json={"question": "训练用了多少块 GPU，什么型号？", "paper_id": "1706.03762v1"},
+    )
     check("ask 200", r.status_code == 200)
     ans = r.json()
     check("ask 有答案", len(ans.get("answer", "")) > 10)
@@ -67,6 +72,41 @@ def main() -> int:
     r = client.post("/api/ask/stream", json={"question": "标签平滑取值是多少？"})
     check("stream 200", r.status_code == 200)
     check("stream 事件协议", '"type": "done"' in r.text, r.text[:120])
+
+    # 限定论文提问：库大了之后同一问题有多个合理答案，必须能收窄范围
+    r = client.post(
+        "/api/ask",
+        json={"question": "训练用了多少块 GPU？", "paper_id": "1706.03762v1"},
+    )
+    check("限定论文问答 200", r.status_code == 200, str(r.status_code))
+    if r.status_code == 200:
+        ans3 = r.json()
+        papers = {c["anchor"]["paper_id"] for c in ans3.get("citations", [])}
+        check(
+            "引用只来自指定论文",
+            papers == {"1706.03762v1"},
+            str(papers),
+        )
+
+    # 跨论文对比（需要模型；未配置密钥时应返回 400 而不是 500）
+    from app.llm import has_key
+
+    r = client.post(
+        "/api/compare",
+        json={
+            "dimension": "自注意力机制的作用",
+            "paper_ids": ["1706.03762v1", "1810.04805"],
+            "top_k": 2,
+        },
+    )
+    if has_key():
+        check("跨论文对比 200", r.status_code == 200, f"{r.status_code} {r.text[:120]}")
+        if r.status_code == 200:
+            data = r.json()
+            check("对比返回表格", "|" in data.get("answer", ""), data.get("answer", "")[:80])
+            check("对比标记合法", data.get("invalid_markers") == [], str(data.get("invalid_markers")))
+    else:
+        check("无模型时对比返回 400", r.status_code == 400, str(r.status_code))
 
     # CSV -> 学术图表（模块六）
     csv_path = ROOT / "data" / "samples" / "training_curves.csv"

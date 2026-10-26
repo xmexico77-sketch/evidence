@@ -51,9 +51,10 @@ from .graph.future import (
 from .graph.review import build_area_reviews
 from .indexing import HybridRetriever, Store, build_chunks
 from .llm import DeepSeekClient, ExtractiveLLM, Message, has_key
-from .llm.prompts import TRANSLATE_PARAGRAPH
+from .llm.prompts import CROSS_PAPER_COMPARE, TRANSLATE_PARAGRAPH
 from .parsing import parse_pdf, summary
 from .rag import GroundedAnswerer
+from .rag.answerer import Evidence, validate_markers
 from .writing import build_chart
 from .writing.framework import build_framework, to_mermaid
 
@@ -395,17 +396,23 @@ def citation_graph() -> dict:
 
 
 @app.get("/api/graph/review")
-def area_reviews(refresh: bool = False) -> dict:
+def area_reviews(refresh: bool = False, use_llm: bool = True) -> dict:
     """自动综述 + Idea 考古。
 
     这个计算要跑几十秒（37 条 Future Work 各做一次检索+重排），
     所以结果按"库指纹"落盘缓存，只有库变了或显式 refresh 才重算。
+
+    有模型时（use_llm=True 且配置了 Key）综述写成叙述性文字、
+    Idea 判定也交给模型；缓存的指纹里带上这个标志，
+    否则先算的启发式结果会一直顶着不回。
     """
     store = get_state()["store"]
+    llm = get_state()["llm"] if (use_llm and has_key()) else None
     fingerprint = json.dumps(
         {
             "papers": len(store.list_papers()),
             "chunks": len(store.load_chunks()),
+            "llm": bool(llm),
         },
         sort_keys=True,
     )
@@ -423,7 +430,7 @@ def area_reviews(refresh: bool = False) -> dict:
 
     g, works = build_graph(store)
     works = compute_metrics(g, works)
-    reviews = build_area_reviews(works, store, llm=None)
+    reviews = build_area_reviews(works, store, llm=llm)
 
     year_by_paper: dict[str, int] = {}
     for w in works.values():
@@ -433,7 +440,7 @@ def area_reviews(refresh: bool = False) -> dict:
     retriever = get_state()["retriever"]
     items = extract_future_work(store, year_by_paper)
     cluster_items(items)
-    assess_items(items, retriever, year_by_paper, llm=None)
+    assess_items(items, retriever, year_by_paper, llm=llm)
     open_items = summarize_order(items, 6)
 
     payload = {
@@ -584,6 +591,78 @@ async def search(req: AskRequest) -> list[SearchHit]:
             )
             for h in hits
         ]
+
+    return await run_in_threadpool(_run)
+
+
+class CompareRequest(BaseModel):
+    dimension: str = Field(min_length=2, max_length=200)
+    paper_ids: list[str] = Field(min_length=2, max_length=2)
+    top_k: int = Field(default=4, ge=1, le=8)
+
+
+@app.post("/api/compare")
+async def compare_papers(req: CompareRequest) -> dict:
+    """跨论文对比：两篇论文沿同一维度对齐，输出带证据的 Markdown 表格。
+
+    赛题点名"多篇论文跨文献对比（承袭与抛弃关系、参数量演化等）"。
+    这里强制每格标注来源编号，并复用问答链路的标记校验：
+    引用了不存在的编号即判不可信，不把编造内容当结论返回。
+    """
+    state = get_state()
+    if not has_key():
+        raise HTTPException(400, "跨论文对比需要配置模型")
+
+    store = state["store"]
+    for pid in req.paper_ids:
+        if store.get_paper(pid) is None:
+            raise HTTPException(404, f"论文不存在: {pid}")
+
+    retriever = state["retriever"]
+
+    def _run() -> dict:
+        evidence: list[Evidence] = []
+        for pid in req.paper_ids:
+            hits = retriever.search(req.dimension, top_k=req.top_k, paper_filter={pid})
+            for h in hits:
+                evidence.append(Evidence(index=len(evidence) + 1, chunk=h))
+        if not evidence:
+            return {
+                "answer": "证据不足：两篇论文中都没有与该维度相关的内容。",
+                "grounded": False,
+                "citations": [],
+                "invalid_markers": [],
+            }
+
+        ev_text = "\n".join(
+            f"[E{e.index}] {e.chunk['paper_id']} · p{e.chunk['page_start']} · "
+            f"§{e.chunk.get('section_title') or '正文'}\n{e.chunk['text'][:600]}"
+            for e in evidence
+        )
+        messages = [
+            Message(role=role, content=content)
+            for role, content in CROSS_PAPER_COMPARE.render(
+                dimension=req.dimension, evidence=ev_text
+            )
+        ]
+        answer = state["llm"].chat(messages).strip()
+        valid, invalid = validate_markers(answer, evidence)
+        citations = [
+            {
+                "marker": f"[E{i}]",
+                "anchor": evidence[i - 1].anchor,
+                "snippet": evidence[i - 1].chunk["text"][:200],
+            }
+            for i in valid
+        ]
+        return {
+            "answer": answer,
+            "grounded": bool(valid),
+            "citations": citations,
+            "invalid_markers": invalid,
+            "dimension": req.dimension,
+            "paper_ids": req.paper_ids,
+        }
 
     return await run_in_threadpool(_run)
 

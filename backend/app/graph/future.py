@@ -129,6 +129,11 @@ def _cos(a, b) -> float:  # noqa: ANN001
     return float(va @ vb / denom) if denom else 0.0
 
 
+# 交给模型判定的条数上限。古考是"锦上添花"的功能，不能让它把成本与耗时拖爆；
+# 只判最像"已解决"的前若干条，其余保持"部分相关"，仍然不下结论。
+MAX_LLM_JUDGE = 8
+
+
 def assess_items(
     items: list[FutureItem],
     retriever,  # noqa: ANN001
@@ -136,7 +141,11 @@ def assess_items(
     llm=None,  # noqa: ANN001
     top_k: int = 3,
 ) -> list[FutureItem]:
-    """对每条 Future Work 做"是否已被后续工作解决"的证据评估。"""
+    """对每条 Future Work 做"是否已被后续工作解决"的证据评估。
+
+    两趟：先算证据分并给出保守状态；再挑最像"已解决"的前 N 条交给模型判定。
+    这样可以明确控制模型调用次数，而不是"有多少条调多少次"。
+    """
     for item in items:
         later = {p for p, y in year_by_paper.items() if y and y > item.year}
         if not item.year or not later:
@@ -157,22 +166,32 @@ def assess_items(
             }
             for h in hits[:2]
         ]
-        if item.score >= RESOLVED_SCORE:
-            # 关键约束：**没有模型时绝不允许下"已解决"结论**。
-            # 重排分只能说明"相关"，不能说明"已解决"——
-            # 实测把 "To facilitate future work…we release our dataset"
-            # 判成已解决，因为 GPT-3 引言段落得分高。这是不能接受的误判。
-            if llm is not None:
+        # 没有模型时最高只到"部分相关"——证据分只能说明相关，不能说明已解决
+        item.status = (
+            STATUS_PARTIAL if item.score >= RESOLVED_SCORE else STATUS_OPEN
+        )
+
+    if llm is not None:
+        candidates = sorted(
+            (it for it in items if it.score >= RESOLVED_SCORE),
+            key=lambda it: it.score,
+            reverse=True,
+        )[:MAX_LLM_JUDGE]
+        for item in candidates:
+            later = {p for p, y in year_by_paper.items() if y and y > item.year}
+            hits = retriever.search(item.text, top_k=top_k, paper_filter=later)
+            if hits:
                 item.status = _judge_with_llm(item, hits, llm)
-            else:
-                item.status = STATUS_PARTIAL
-        else:
-            item.status = STATUS_OPEN
+
     return items
 
 
 def _judge_with_llm(item: FutureItem, hits: list[dict], llm) -> str:  # noqa: ANN001
-    """有模型时让模型基于证据判定；模型只能在这四种状态里选。"""
+    """有模型时让模型基于证据判定；模型只能在这四种状态里选。
+
+    单条失败不能让整批崩掉——外部模型服务会超时、会限流、会返回怪东西，
+    这类考古是"锦上添花"的功能，不该拖垮主线。
+    """
     from ..llm.prompts import FUTURE_JUDGE
 
     evidence = "\n".join(
@@ -183,7 +202,10 @@ def _judge_with_llm(item: FutureItem, hits: list[dict], llm) -> str:  # noqa: AN
         _msg(role, content)
         for role, content in FUTURE_JUDGE.render(claim=item.text, evidence=evidence)
     ]
-    raw = llm.chat(messages).strip()
+    try:
+        raw = llm.chat(messages).strip()
+    except Exception:  # noqa: BLE001
+        return STATUS_PARTIAL
     head = raw.split("\n", 1)[0].strip()
     for candidate in (STATUS_SOLVED, STATUS_PARTIAL, STATUS_OPEN):
         if head.startswith(candidate):
