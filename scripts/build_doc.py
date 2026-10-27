@@ -104,6 +104,22 @@ def code(doc, text):
 
 TEXT_WIDTH_CM = 16.0  # 21.0 - 2.6 - 2.4
 
+UI_SHOT_DIR = ROOT / "docs" / "figures-ui"
+
+
+def ui_figure(doc, filename: str, cap: str, width_cm: float = TEXT_WIDTH_CM) -> bool:
+    """插入界面截图 + 图注（复用已有 figure 实现）。
+
+    截图由 scripts/ui_shot.py 真实抓取（本机 Edge 无头模式），不是设计稿。
+    文件缺失时跳过，并打印警告——文档不该因为少一张图就构建失败。
+    """
+    path = UI_SHOT_DIR / filename
+    if not path.exists():
+        print(f"  [warn] 缺少界面截图 {path}")
+        return False
+    figure(doc, path, width_cm, cap)
+    return True
+
 
 def _fixed_layout(t, total_cm: float) -> None:
     """强制固定列宽。
@@ -730,6 +746,51 @@ def build() -> Document:
         doc,
         "之所以对引用比对结论更严，是因为编造结论是能力问题、可以靠证据链纠正；"
         "编造引用是诚信问题，读者一旦发现便不再信任整个系统。",
+    )
+
+    h2(doc, "5.8  界面实录")
+    para(
+        doc,
+        "以下截图由 scripts/ui_shot.py 在本机真实运行的系统上抓取"
+        "（无头浏览器 + DevTools 协议），不是设计稿，也未做后期美化。"
+        "文字与数据均为实际运行结果。",
+    )
+
+    ui_figure(
+        doc,
+        "01-ask.png",
+        "图 5-2  工作台：限定《Attention Is All You Need》后提问，返回“有据”，"
+        "三条锚点分别落在 p7 §Hardware and Schedule、p1 §Abstract、p7 §Machine Translation",
+    )
+    ui_figure(
+        doc,
+        "04-compare.png",
+        "图 5-3  跨篇对比：Transformer 与 BERT 沿“自注意力与预训练目标”对齐，"
+        "表格每格标注证据编号，模型对不确定之处写“未明确阐述”而不是编造承袭关系",
+    )
+    ui_figure(
+        doc,
+        "02-reader.png",
+        "图 5-4  阅读器：左侧保留原版式 PDF 渲染，中间为标题树，"
+        "右侧为段落级正文；三者以段落锚点双向联动（本图为 p1 状态）",
+    )
+    ui_figure(
+        doc,
+        "03-graph.png",
+        "图 5-5  引用图谱：21 个节点、56 条边、5 个社区；"
+        "金色描边为基石论文，节点大小按 PageRank 映射，左侧给出基石榜与边缘衍生榜",
+    )
+    ui_figure(
+        doc,
+        "05-discover.png",
+        "图 5-6  论文发现：arXiv 检索结果按“60% 语义相近 + 25% 可复现性 + 15% 方向偏好”排序，"
+        "支持一键入库并自动建索引",
+    )
+    ui_figure(
+        doc,
+        "06-write.png",
+        "图 5-7  论文框架：7 个章节的提纲与英文草稿，每节标注“有据/待补充”，"
+        "参考文献仅取自库内已解析文献并通过核验",
     )
 
     page_break(doc)

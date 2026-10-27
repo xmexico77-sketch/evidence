@@ -1,0 +1,7 @@
+[
+  {
+    "eval": "(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='检索');if(b){b.click();return 'clicked'}return 'NONE'})()"
+  },
+  { "wait": 38000 },
+  { "shot": "discover-results" }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "eval": "(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes('稀疏注意力'));if(b){b.click();return b.textContent}return 'NONE'})()"
+  },
+  { "wait": 600 },
+  {
+    "eval": "(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='生成框架');if(b){b.click();return 'clicked'}return 'NONE'})()"
+  },
+  { "wait": 45000 },
+  { "shot": "write-result" }
+]
