@@ -85,6 +85,7 @@ CHECKS = [
         "script": "test_web.py",
         "heavy": False,
         "covers": "交付",
+        "requires": "web",
     },
     {
         "name": "版式泛化（5 篇未见论文的解析鲁棒性）",
@@ -101,14 +102,48 @@ CHECKS = [
 ]
 
 
+def service_state() -> dict[str, bool]:
+    """预检后端与前端是否在跑。
+
+    为什么需要：服务没起时，相关检查会以"失败"出现在报告里，
+    看上去像代码坏了——本会话实测过两次，两次都是环境问题。
+    验收报告必须能区分"代码错"和"没起服务"。
+    """
+    import urllib.error
+    import urllib.request
+
+    def alive(url: str) -> bool:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as r:
+                return r.status == 200
+        except (urllib.error.URLError, TimeoutError, OSError):
+            return False
+
+    return {
+        "api": alive("http://127.0.0.1:8000/api/health"),
+        "web": alive("http://127.0.0.1:3001"),
+    }
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true", help="跳过需要加载向量模型的检查")
     args = ap.parse_args()
 
+    services = service_state()
+    if not all(services.values()):
+        down = [k for k, v in services.items() if not v]
+        print(f"[预检] 未运行：{', '.join(down)}")
+        print("       相关检查将标记为跳过（而不是失败）。")
+        print("       启动方式：scripts/start.ps1（或分别 uvicorn / next start）\n")
+
     rows: list[tuple[str, str, str, float]] = []
     for check in CHECKS:
+        need = check.get("requires")
         if args.quick and check["heavy"]:
+            rows.append((check["covers"], check["name"], "SKIP", 0.0))
+            continue
+        if need and not services.get(need, False):
             rows.append((check["covers"], check["name"], "SKIP", 0.0))
             continue
         started = time.time()
@@ -138,6 +173,8 @@ def main() -> int:
     failed = [r for r in rows if r[2] == "FAIL"]
     skipped = [r for r in rows if r[2] == "SKIP"]
     print(f"通过 {len(rows) - len(failed) - len(skipped)} / 失败 {len(failed)} / 跳过 {len(skipped)}")
+    if skipped:
+        print("跳过的检查必须有明确原因（--quick 或服务未启动），不要当成通过。")
     return 1 if failed else 0
 
 
