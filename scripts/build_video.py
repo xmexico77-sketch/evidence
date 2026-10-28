@@ -27,23 +27,30 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SHOT_DIR = ROOT / "docs" / "preview"
+SHOT_DIR = ROOT / "docs" / "video-shots"
 FIGS = ROOT / "docs" / "figures-ui"
 
-# 镜头顺序与权重，对应 docs/演示视频脚本.md 的九段分镜
+# 镜头顺序与权重，对应 docs/演示视频脚本.md 的分镜。
+# 与文档共用的界面图直接引用 figures-ui，避免仓库里存两份。
 SHOTS: list[dict] = [
-    {"name": "01-ask", "file": FIGS / "01-ask.png", "weight": 2.0,
-     "caption": "① 带锚点的问答：每句结论可回到原文某页某段"},
-    {"name": "02-reader", "file": FIGS / "02-reader.png", "weight": 2.0,
-     "caption": "② 版式保真阅读：原版式 PDF、标题树、段落锚点三栏联动"},
-    {"name": "03-graph", "file": FIGS / "03-graph.png", "weight": 1.6,
-     "caption": "③ 引用图谱：基石论文识别与社区划分"},
-    {"name": "04-compare", "file": FIGS / "04-compare.png", "weight": 1.6,
-     "caption": "④ 跨篇对比：不确定之处明确写“未明确阐述”"},
-    {"name": "05-discover", "file": FIGS / "05-discover.png", "weight": 1.0,
-     "caption": "⑤ 论文发现：可复现性加权推荐"},
-    {"name": "06-write", "file": FIGS / "06-write.png", "weight": 1.0,
-     "caption": "⑥ 论文框架：提纲与草稿，引用逐条核验"},
+    {"name": "00-cover", "file": SHOT_DIR / "00-cover.png", "weight": 0.9,
+     "caption": "开场：证源 Evidence"},
+    {"name": "01-home", "file": SHOT_DIR / "01-home.png", "weight": 1.0,
+     "caption": "① 工作台：六大模块入口"},
+    {"name": "02-ask", "file": FIGS / "01-ask.png", "weight": 1.3,
+     "caption": "② 有据回答：三条锚点各带页码与节名"},
+    {"name": "03-refusal", "file": SHOT_DIR / "03-refusal.png", "weight": 0.9,
+     "caption": "③ 不限定范围时拒答，并说明歧义在哪"},
+    {"name": "04-reader", "file": FIGS / "02-reader.png", "weight": 1.3,
+     "caption": "④ 版式保真阅读：PDF、标题树、段落锚点"},
+    {"name": "05-graph", "file": FIGS / "03-graph.png", "weight": 1.0,
+     "caption": "⑤ 引用图谱：基石论文识别与社区划分"},
+    {"name": "06-compare", "file": FIGS / "04-compare.png", "weight": 1.1,
+     "caption": "⑥ 跨篇对比：不确定处写“未明确阐述”"},
+    {"name": "07-discover", "file": FIGS / "05-discover.png", "weight": 0.8,
+     "caption": "⑦ 论文发现：可复现性加权推荐"},
+    {"name": "08-write", "file": FIGS / "06-write.png", "weight": 1.0,
+     "caption": "⑧ 论文框架：提纲与草稿，引用逐条核验"},
 ]
 
 
