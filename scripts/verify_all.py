@@ -105,6 +105,12 @@ CHECKS = [
         "heavy": False,
         "covers": "交付",
     },
+    {
+        "name": "部署静态检查（Dockerfile/compose/环境变量）",
+        "script": "check_deploy_static.py",
+        "heavy": False,
+        "covers": "交付",
+    },
 ]
 
 
