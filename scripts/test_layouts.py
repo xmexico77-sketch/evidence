@@ -88,6 +88,8 @@ def main() -> int:
         check(f"{arxiv_id} 标题数 >= {MIN_HEADINGS}", st["headings"] >= MIN_HEADINGS, str(st["headings"]))
         check(f"{arxiv_id} 文献数 >= {MIN_REFS}", st["references"] >= MIN_REFS, str(st["references"]))
         check(f"{arxiv_id} 有页级锚点", st["blocks"] > 0)
+        # 正文引用要能出：编号式（IEEE/CVPR）与作者-年份式（ACL/ICML）都算
+        check(f"{arxiv_id} 能解析正文引用", st["citations"] > 0, str(st["citations"]))
 
         if st["headings"] < MIN_HEADINGS or st["references"] < MIN_REFS:
             print("    前 6 个标题：", [f"{h.number} {h.text}"[:36] for h in paper.headings[:6]])

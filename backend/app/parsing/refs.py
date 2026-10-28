@@ -238,12 +238,26 @@ def parse_author_year_citations(
     if not references:
         return []
 
+    # 两级索引：
+    # 1) 首作者姓 + 年份（最强证据）；
+    # 2) 该文献"年份之前的作者区"里出现过的任何姓 + 年份。
+    # 之所以需要第二级：ACL 模板的参考文献经常被切在半途
+    # （"Ravula, Sumit Sanghai…" 其实是上一条的续行），首作者信息丢失，
+    # 实测 Longformer 48 处引用只配上 10 处；放宽到作者区后能配上大半，
+    # 且仍限定在同一年的条目内，不会把 2019 的引用指到 2017 的文章上。
     index: dict[tuple[str, str], int] = {}
+    loose: dict[tuple[str, str], int] = {}
     for ref in references:
-        surname = _first_surname(ref.text)
         year_match = _REF_YEAR_RE.search(ref.text)
-        if surname and year_match:
-            index.setdefault((surname, year_match.group(1)), ref.index)
+        if not year_match:
+            continue
+        year = year_match.group(1)
+        surname = _first_surname(ref.text)
+        if surname:
+            index.setdefault((surname, year), ref.index)
+        author_zone = ref.text[: year_match.start()]
+        for name in re.findall(r"[A-Z][A-Za-z\-'’]{2,}", author_zone):
+            loose.setdefault((name.lower(), year), ref.index)
 
     out: list[Citation] = []
     for idx, blk in enumerate(blocks):
@@ -253,7 +267,7 @@ def parse_author_year_citations(
             continue
         for m in _AUTHOR_YEAR_RE.finditer(blk.text):
             surname, year = m.group(1).lower(), m.group(2)
-            ref_index = index.get((surname, year))
+            ref_index = index.get((surname, year), loose.get((surname, year)))
             if ref_index is None:
                 continue
             out.append(
