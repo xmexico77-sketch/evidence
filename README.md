@@ -177,6 +177,24 @@ python scripts/check_deploy.py https://你的域名 --user reviewer --password �
 
 ---
 
+## 界面预览
+
+以下截图由 `scripts/ui_shot.py` 在实机运行的系统上抓取（无头 Edge + DevTools 协议），非设计稿。
+
+| 工作台：限定论文后返回"有据"与三条锚点 | 跨篇对比：不确定处写"未明确阐述" |
+|---|---|
+| ![](docs/figures-ui/01-ask.png) | ![](docs/figures-ui/04-compare.png) |
+
+| 阅读器：原版式 PDF + 标题树 + 段落锚点 | 引用图谱：基石论文与社区 |
+|---|---|
+| ![](docs/figures-ui/02-reader.png) | ![](docs/figures-ui/03-graph.png) |
+
+| 论文发现：可复现性加权推荐 | 论文框架：提纲与草稿，引用逐条核验 |
+|---|---|
+| ![](docs/figures-ui/05-discover.png) | ![](docs/figures-ui/06-write.png) |
+
+---
+
 ## 目录结构
 
 ```
