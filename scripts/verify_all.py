@@ -99,6 +99,12 @@ CHECKS = [
         "heavy": True,
         "covers": "模块一",
     },
+    {
+        "name": "文档一致性（链接/账号/数字/ADR 索引）",
+        "script": "check_docs.py",
+        "heavy": False,
+        "covers": "交付",
+    },
 ]
 
 
