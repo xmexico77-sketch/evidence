@@ -159,12 +159,12 @@ python scripts/check_deploy.py https://你的域名 --user reviewer --password �
 .venv/Scripts/python.exe scripts/verify_all.py
 ```
 
-输出示例（本机实测）：
+输出示例（本机实测，16 项）：
 
 | 模块 | 检查项 | 结果 |
 |---|---|---|
 | 模块一 | 解析质量（双栏/标题树/参考文献/锚点） | 通过 |
-| 模块二 | 跨语言检索（中文问英文细读级事实） | 通过 |
+| 模块二 | 跨语言检索（中文问英文论文细粒度事实） | 通过 |
 | 模块二 | 抗幻觉 Guardrails（编号校验/相关性闸门/拒答） | 通过 |
 | 闭环 | 服务层接口（健康/检索/问答/SSE/拒答/图表） | 通过 |
 | 模块五 | 引用图谱（版本合并/基石榜/关键边/社区） | 通过 |
@@ -175,6 +175,19 @@ python scripts/check_deploy.py https://你的域名 --user reviewer --password �
 | 模块一 | 版式泛化（5 篇未见论文） | 通过 |
 | 模块一 | 长文档压测（507 页 / 内存 / 索引成本） | 通过 |
 | 交付 | 前端冒烟（页面可达/导航一致/无残留） | 通过 |
+| 交付 | 文档一致性（链接/账号/数字/ADR 索引） | 通过 |
+| 交付 | 部署静态检查（Dockerfile/compose/环境变量） | 通过 |
+| 交付 | 依赖完整性（import 是否都进了依赖清单） | 通过 |
+| 交付 | 认证与评审账号（登录/Cookie/Bearer/篡改） | 通过 |
+
+> `verify_all.py` 会先探测后端与前端是否在跑：未运行的服务其检查标记为
+> **跳过**而不是失败，避免把"没起服务"误读成"代码坏了"。
+
+部署到公网后，另有一份针对**已部署服务**的自检（9 项）：
+
+```bash
+.venv/Scripts/python.exe scripts/check_deploy.py https://你的域名 --user reviewer --password 密码
+```
 
 ---
 
