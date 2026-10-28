@@ -120,12 +120,17 @@ def main() -> int:
         print(f"  文献库：{len(papers)} 篇，示例 {papers[0]['id']}")
 
     # 4. 问答（核心链路，带锚点）
-    code, body = c.request(
-        "/api/ask",
-        method="POST",
-        payload={"question": "训练用了多少块 GPU，什么型号？", "top_k": 5},
-        timeout=180,
+    #    必须像真实用户那样**限定论文**提问：库里多篇论文都有"训练用了多少块 GPU"
+    #    这类陈述（Transformer 是 P100、Longformer 是 V100），不限定范围时
+    #    系统会按设计拒答并说明歧义——那是正确行为，不该判为部署失败。
+    target = next(
+        (p["id"] for p in papers if p["id"].startswith("1706.03762")),
+        papers[0]["id"] if papers else None,
     )
+    payload: dict = {"question": "训练用了多少块 GPU，什么型号？", "top_k": 5}
+    if target:
+        payload["paper_id"] = target
+    code, body = c.request("/api/ask", method="POST", payload=payload, timeout=180)
     ok = False
     if code == 200:
         try:
@@ -133,7 +138,7 @@ def main() -> int:
             cites = ans.get("citations") or []
             ok = bool(ans.get("grounded")) and bool(cites)
             if cites:
-                print(f"  问答：有据，锚点 {cites[0]['anchor']['label']}")
+                print(f"  问答：有据（限定 {target}），锚点 {cites[0]['anchor']['label']}")
         except Exception:  # noqa: BLE001
             pass
     check("问答返回带锚点的有据回答", ok, f"{code} {body[:120]}")
