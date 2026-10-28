@@ -13,7 +13,30 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-GIT = "git"
+
+
+def find_git() -> str:
+    """找可用的 git。
+
+    本机 git 装在 D:\\deepseek\\tools\\git\\cmd\\git.exe，不在 PATH 里；
+    直接调用 "git" 会失败，并被误报成"仓库不存在"——所以先按常见位置找。
+    """
+    from shutil import which
+
+    found = which("git")
+    if found:
+        return found
+    for candidate in (
+        r"D:\deepseek\tools\git\cmd\git.exe",
+        r"C:\Program Files\Git\cmd\git.exe",
+        r"C:\Program Files (x86)\Git\cmd\git.exe",
+    ):
+        if Path(candidate).exists():
+            return candidate
+    return "git"
+
+
+GIT = find_git()
 
 rows: list[tuple[str, str, str]] = []  # (级别, 项目, 说明)
 
