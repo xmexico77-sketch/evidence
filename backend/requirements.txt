@@ -36,3 +36,7 @@ pandas==3.0.1
 # 其他
 aiosqlite==0.22.1
 tenacity==9.2.1
+
+# FastAPI 的底层 ASGI 框架；main.py 直接用到 run_in_threadpool，
+# 属于直接依赖而非仅传递依赖，显式钉住版本
+starlette==1.9.0

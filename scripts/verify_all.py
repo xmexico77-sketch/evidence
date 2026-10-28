@@ -111,6 +111,12 @@ CHECKS = [
         "heavy": False,
         "covers": "交付",
     },
+    {
+        "name": "依赖完整性（import 是否都进了依赖清单）",
+        "script": "check_deps.py",
+        "heavy": False,
+        "covers": "交付",
+    },
 ]
 
 
