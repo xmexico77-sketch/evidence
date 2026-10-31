@@ -39,3 +39,7 @@ docs/checks.json
 pip-unpack-*/
 jieba.cache
 *.cache/
+# 配音：只保留合成本段与清单，分段音频可由 make_voiceover.py 重新生成
+docs/voiceover/shot*.mp3
+docs/voiceover/dub*.mp3
+docs/voiceover/dub*.srt
