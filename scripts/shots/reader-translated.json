@@ -1,0 +1,8 @@
+[
+  { "wait": 8000 },
+  {
+    "eval": "(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes('翻译本页'));if(b){b.click();return 'clicked'}return 'NONE'})()"
+  },
+  { "wait": 25000 },
+  { "shot": "reader-translated" }
+]

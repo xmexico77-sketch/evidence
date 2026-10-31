@@ -38,24 +38,26 @@ CONTENT_H = FRAME_H - BAR_H
 # 镜头顺序与权重，对应 docs/演示视频脚本.md 的分镜。
 # 与文档共用的界面图直接引用 figures-ui，避免仓库里存两份。
 SHOTS: list[dict] = [
-    {"name": "00-cover", "file": SHOT_DIR / "00-cover.png", "weight": 0.9,
-     "caption": "开场：证源 Evidence"},
-    {"name": "01-home", "file": SHOT_DIR / "01-home.png", "weight": 1.0,
-     "caption": "① 工作台：六大模块入口"},
-    {"name": "02-ask", "file": FIGS / "01-ask.png", "weight": 1.3,
-     "caption": "② 有据回答：三条锚点各带页码与节名"},
-    {"name": "03-refusal", "file": SHOT_DIR / "03-refusal.png", "weight": 0.9,
-     "caption": "③ 不限定范围时拒答，并说明歧义在哪"},
-    {"name": "04-reader", "file": FIGS / "02-reader.png", "weight": 1.3,
-     "caption": "④ 版式保真阅读：PDF、标题树、段落锚点"},
-    {"name": "05-graph", "file": FIGS / "03-graph.png", "weight": 1.0,
-     "caption": "⑤ 引用图谱：基石论文识别与社区划分"},
-    {"name": "06-compare", "file": FIGS / "04-compare.png", "weight": 1.1,
-     "caption": "⑥ 跨篇对比：不确定处写“未明确阐述”"},
-    {"name": "07-discover", "file": FIGS / "05-discover.png", "weight": 0.8,
-     "caption": "⑦ 论文发现：可复现性加权推荐"},
-    {"name": "08-write", "file": FIGS / "06-write.png", "weight": 1.0,
-     "caption": "⑧ 论文框架：提纲与草稿，引用逐条核验"},
+    {"name": "00-cover", "file": SHOT_DIR / "00-cover.png",
+     "caption": "证源 Evidence —— 带段落级锚点溯源的科研助手 Agent"},
+    {"name": "01-reader", "file": FIGS / "02-reader.png",
+     "caption": "① 解析：从字符坐标重建标题树，保留原版式"},
+    {"name": "02-ask", "file": FIGS / "01-ask.png",
+     "caption": "② 有据问答：[E1] 标记经服务端校验，可跳回原文某行"},
+    {"name": "03-refusal", "file": SHOT_DIR / "03-refusal.png",
+     "caption": "③ 抗幻觉：答不出就拒答，并说明为什么"},
+    {"name": "04-bilingual", "file": SHOT_DIR / "04-bilingual.png",
+     "caption": "④ 双语联动：按段落锚点对齐，拖动任一侧另一侧跟随"},
+    {"name": "05-graph", "file": FIGS / "03-graph.png",
+     "caption": "⑤ 引用图谱：22 篇 → 21 节点 56 边，基石论文金色描边"},
+    {"name": "06-discover", "file": FIGS / "05-discover.png",
+     "caption": "⑥ 论文发现：60% 语义相近 + 25% 可复现性 + 15% 方向偏好"},
+    {"name": "07-charts", "file": SHOT_DIR / "07-charts.png",
+     "caption": "⑦ 数据可视化：量级差自动分副轴，附可复现脚本"},
+    {"name": "08-compare", "file": FIGS / "04-compare.png",
+     "caption": "⑧ 技术亮点：三道抗幻觉约束、字符级解析、可执行断言"},
+    {"name": "09-closing", "file": SHOT_DIR / "09-closing.png",
+     "caption": "让每一个结论，都能回到原文"},
 ]
 
 
@@ -146,8 +148,8 @@ def plan(timing: list[float] | None, total: float) -> list[float]:
         if len(timing) != len(SHOTS):
             raise SystemExit(f"--timing 需要 {len(SHOTS)} 个秒数")
         return timing
-    weight_sum = sum(s["weight"] for s in SHOTS)
-    return [round(total * s["weight"] / weight_sum, 2) for s in SHOTS]
+    weight_sum = sum(s.get("weight", 1.0) for s in SHOTS) or 1.0
+    return [round(total * s.get("weight", 1.0) / weight_sum, 2) for s in SHOTS]
 
 
 def main() -> int:
