@@ -34,3 +34,8 @@ build/
 *.mp4
 docs/preview/
 docs/checks.json
+
+# pip 解包临时目录与 jieba 缓存（安装依赖时留在仓库根目录，不属于项目）
+pip-unpack-*/
+jieba.cache/
+*.cache/
