@@ -30,6 +30,11 @@ ROOT = Path(__file__).resolve().parent.parent
 SHOT_DIR = ROOT / "docs" / "video-shots"
 FIGS = ROOT / "docs" / "figures-ui"
 
+# 画面 1920x1080 拆成两部分：界面区 1920x972 + 字幕带 108px
+FRAME_W, FRAME_H = 1920, 1080
+BAR_H = 108
+CONTENT_H = FRAME_H - BAR_H
+
 # 镜头顺序与权重，对应 docs/演示视频脚本.md 的分镜。
 # 与文档共用的界面图直接引用 figures-ui，避免仓库里存两份。
 SHOTS: list[dict] = [
@@ -74,6 +79,50 @@ def find_ffmpeg() -> str:
     )
 
 
+def find_font(size: int):
+    """给字幕条找中文字体；找不到就退回默认字体（可能缺字，但不会崩）。"""
+    from PIL import ImageFont
+
+    for path in (
+        r"C:\Windows\Fonts\msyh.ttc",
+        r"C:\Windows\Fonts\msyhbd.ttc",
+        r"C:\Windows\Fonts\simhei.ttf",
+    ):
+        if Path(path).exists():
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:  # noqa: BLE001
+                continue
+    return ImageFont.load_default()
+
+
+def make_caption_png(text: str, out: Path, width: int = 1920, height: int = 1080) -> Path:
+    """画整帧大小的字幕层：上方透明、底部 BAR_H 像素是字幕带。
+
+    为什么不在 ffmpeg 里用 drawtext/subtitles：中文文本要经过多层转义，
+    正则在 Windows 路径上还容易踩坑；先用 PIL 画成图片再 overlay，
+    可控且不会有编码问题。
+
+    字幕带是**独立区域**：画面缩到 1920x972 顶置，底部 108px 只放字幕。
+    盖住界面会让"看得见的功能"变成"看不清的功能"。
+    """
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    top = height - BAR_H
+    d.rectangle([0, top, width, height], fill=(10, 13, 19, 255))
+    d.rectangle([0, top, width, top + 2], fill=(96, 165, 250, 255))
+
+    font = find_font(38)
+    bbox = d.textbbox((0, 0), text, font=font)
+    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    d.text(((width - tw) / 2, top + (BAR_H - th) / 2 - bbox[1]), text,
+           font=font, fill=(235, 240, 248, 255))
+    img.save(out)
+    return out
+
+
 def probe_duration(ffmpeg_exe: str, audio: Path) -> float:
     """用 ffmpeg 自带的 ffprobe 取时长。"""
     ffprobe = Path(ffmpeg_exe).with_name("ffprobe.exe")
@@ -108,6 +157,7 @@ def main() -> int:
     ap.add_argument("--out", default="docs/演示视频.mp4")
     ap.add_argument("--timing", help="逗号分隔的每镜头秒数")
     ap.add_argument("--fps", type=int, default=30)
+    ap.add_argument("--no-captions", action="store_true", help="不叠加镜头字幕条")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -147,25 +197,50 @@ def main() -> int:
 
     out_path = (ROOT / args.out) if not Path(args.out).is_absolute() else Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    W, H = 1920, 1080
 
     with TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
         segs: list[Path] = []
         for i, (shot, dur) in enumerate(zip(SHOTS, durations)):
             seg = tmp_dir / f"seg{i:02d}.mp4"
-            # 等比缩放并加黑边到 1920x1080；底部留白给字幕
-            vf = (
-                f"scale={W}:{H}:force_original_aspect_ratio=decrease,"
-                f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:color=0x0b0e14"
-            )
-            cmd = [
-                ffmpeg_exe, "-y", "-loop", "1", "-i", str(shot["file"]),
-                "-t", f"{dur:.2f}", "-vf", vf, "-r", str(args.fps),
+            target_h = CONTENT_H if not args.no_captions else FRAME_H
+            # 等比缩放 + 顶置补边：pad 的 x/y 显式给 0，
+            # 否则 pad 会居中，导致画面上下都有空带、字幕带位置对不上
+            if args.no_captions:
+                vf = (
+                    f"scale={FRAME_W}:{FRAME_H}:force_original_aspect_ratio=decrease,"
+                    f"pad={FRAME_W}:{FRAME_H}:(ow-iw)/2:(oh-ih)/2:color=0x0a0d13"
+                )
+            else:
+                vf = (
+                    f"scale={FRAME_W}:{target_h}:force_original_aspect_ratio=decrease,"
+                    f"pad={FRAME_W}:{FRAME_H}:0:0:color=0x0a0d13"
+                )
+            inputs = [ffmpeg_exe, "-y", "-loop", "1", "-i", str(shot["file"])]
+            extra: list[str] = []
+
+            if not args.no_captions:
+                cap_png = make_caption_png(
+                    shot["caption"], tmp_dir / f"cap{i:02d}.png", FRAME_W, FRAME_H
+                )
+                inputs += ["-loop", "1", "-i", str(cap_png)]
+                # 两个输入要用 filter_complex，不能用 -vf
+                # （-vf 只接受单输入，会报 "expected to have exactly 1 input"）
+                fg = f"[0:v]{vf}[bg];[bg][1:v]overlay=0:0:format=auto[v]"
+                extra = ["-filter_complex", fg, "-map", "[v]"]
+            else:
+                extra = ["-vf", vf]
+
+            cmd = inputs + [
+                "-t", f"{dur:.2f}", *extra, "-r", str(args.fps),
                 "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "medium",
                 str(seg),
             ]
-            subprocess.run(cmd, capture_output=True, check=True)
+            r = subprocess.run(cmd, capture_output=True)
+            if r.returncode != 0:
+                raise SystemExit(
+                    f"生成第 {i + 1} 个镜头失败：\n{r.stderr.decode('utf-8', 'ignore')[-600:]}"
+                )
             segs.append(seg)
 
         concat_list = tmp_dir / "list.txt"
@@ -198,7 +273,7 @@ def main() -> int:
 
     size_mb = out_path.stat().st_size / 1e6
     print(f"\n已生成 {out_path}  {size_mb:.1f}MB")
-    print(f"分辨率 {W}x{H} @{args.fps}fps，时长约 {sum(durations):.0f}s")
+    print(f"分辨率 {FRAME_W}x{FRAME_H} @{args.fps}fps，时长约 {sum(durations):.0f}s")
     return 0
 
 
