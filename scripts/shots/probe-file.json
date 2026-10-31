@@ -1,0 +1,10 @@
+[
+  {
+    "eval": "(()=>{const i=document.querySelector('input[type=file]');return i?('FOUND '+i.outerHTML.slice(0,80)):'NONE';})()"
+  },
+  { "wait": 500 },
+  {
+    "eval": "(()=>{const i=document.querySelectorAll('input');return i.length + ' inputs, types: ' + [...i].map(x=>x.type).join(',');})()"
+  },
+  { "shot": "probe" }
+]

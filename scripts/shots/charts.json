@@ -1,0 +1,10 @@
+[
+  {
+    "file": {
+      "selector": "input[type=file]",
+      "path": "D:/deepseek/ai4s/data/samples/training_curves.csv"
+    }
+  },
+  { "wait": 12000 },
+  { "shot": "charts" }
+]

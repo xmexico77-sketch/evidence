@@ -34,6 +34,16 @@ type Framework = {
   markdown: string;
 };
 
+type ChartResult = {
+  kind: string;
+  png: string;
+  svg: string;
+  script: string;
+  caption: string;
+  reason: string;
+  stats: Record<string, number | string>;
+};
+
 const SAMPLES = [
   "用稀疏注意力降低长文本推理的显存开销",
   "把位置编码从绝对改为相对以提升长度外推",
@@ -45,6 +55,27 @@ export default function WritePage() {
   const [fw, setFw] = useState<Framework | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // 图表：/api/charts 一直存在，但页面上没有入口（又是"只有接口没有界面"）。
+  // 模块六的「数据可视化」必须能被点到，否则演示时无画面可show。
+  const [chart, setChart] = useState<ChartResult | null>(null);
+  const [chartBusy, setChartBusy] = useState(false);
+  const [chartErr, setChartErr] = useState<string | null>(null);
+
+  const uploadCsv = useCallback(async (file: File) => {
+    setChartBusy(true);
+    setChartErr(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/charts", { method: "POST", body: form });
+      if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
+      setChart((await res.json()) as ChartResult);
+    } catch (e) {
+      setChartErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setChartBusy(false);
+    }
+  }, []);
 
   const run = useCallback(async () => {
     if (!idea.trim() || busy) return;
@@ -129,6 +160,62 @@ export default function WritePage() {
 
         {busy && <Loading label="正在生成提纲与章节草稿…" />}
         {err && <ErrorCard title="框架生成失败" detail={err} />}
+
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <strong style={{ fontSize: 13.5 }}>数据可视化</strong>
+            <span className="dim" style={{ fontSize: 12 }}>
+              上传实验 CSV，自动选图型、出学术图、给图注与可复现脚本
+            </span>
+            <label className="pill" style={{ cursor: "pointer", marginLeft: "auto" }}>
+              {chartBusy ? "生成中…" : "选择 CSV"}
+              <input
+                type="file"
+                accept=".csv"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void uploadCsv(f);
+                }}
+              />
+            </label>
+          </div>
+
+          {chartErr && (
+            <p className="mono" style={{ color: "var(--bad)", fontSize: 12, marginTop: 8 }}>
+              {chartErr}
+            </p>
+          )}
+
+          {chart && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
+                <span className="pill mono">{chart.kind}</span>
+                <span className="pill mono">{chart.png}</span>
+              </div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/figures/${chart.png}`}
+                alt={chart.caption}
+                style={{ width: "100%", borderRadius: 8, border: "1px solid var(--line)" }}
+              />
+              <p style={{ fontSize: 12.5, margin: "10px 0 6px", lineHeight: 1.7 }}>
+                {chart.caption}
+              </p>
+              <p className="dim" style={{ fontSize: 12, margin: 0, lineHeight: 1.7 }}>
+                选型理由：{chart.reason}
+              </p>
+              <details style={{ marginTop: 8 }}>
+                <summary className="dim" style={{ fontSize: 12, cursor: "pointer" }}>
+                  查看可复现脚本
+                </summary>
+                <pre className="mono" style={{ fontSize: 11, overflowX: "auto", marginTop: 6 }}>
+                  {chart.script}
+                </pre>
+              </details>
+            </div>
+          )}
+        </div>
 
         {fw && (
           <>

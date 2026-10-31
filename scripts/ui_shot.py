@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import base64
 import json
+import re
 import subprocess
 import sys
 import time
@@ -113,6 +114,24 @@ class Session:
             timeout=timeout,
         )
 
+    def set_file_input(self, selector: str, path: str) -> None:
+        """给 <input type=file> 塞文件。
+
+        浏览器安全限制不允许 JS 直接写 file input 的 value，
+        只能走 CDP 的 DOM.setFileInputFiles。塞完 Chrome 会自动派发
+        input/change 事件，React 的 onChange 能正常触发。
+        """
+        self.send("DOM.enable")
+        doc = self.send("DOM.getDocument", {"depth": -1})
+        node = self.send(
+            "DOM.querySelector",
+            {"nodeId": doc["root"]["nodeId"], "selector": selector},
+        )
+        node_id = node.get("nodeId")
+        if not node_id:
+            raise RuntimeError(f"找不到文件输入框：{selector}")
+        self.send("DOM.setFileInputFiles", {"files": [path], "nodeId": node_id})
+
     def close(self) -> None:
         try:
             self.ws.close()
@@ -120,8 +139,32 @@ class Session:
             pass
 
 
+def login(sess: "Session", base: str, user: str, password: str, wait_ms: int = 1500) -> bool:
+    """在浏览器里调一次 /api/login 拿到会话 Cookie。
+
+    为什么需要：后端开了认证后，未登录访问任何页面都会被前端重定向到
+    /login——截图会拍成登录页（本会话踩过：以为页面坏了，其实是没登录）。
+    """
+    sess.send("Page.navigate", {"url": f"{base}/login"})
+    time.sleep(wait_ms / 1000)
+    js = (
+        "fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},"
+        f"body:JSON.stringify({{username:'{user}',password:'{password}'}})}})"
+        ".then(r=>r.status)"
+    )
+    try:
+        res = sess.evaluate(js, timeout=20)
+        status = res.get("result", {}).get("value")
+        print(f"  [login] {user} → {status}")
+        return status == 200
+    except Exception as exc:  # noqa: BLE001
+        print(f"  [login] 失败：{exc}")
+        return False
+
+
 def capture(browser: str, port: int, pages: list[tuple[str, str]], out_dir: Path,
-            width: int, height: int, wait_ms: int, steps: list[dict] | None = None) -> int:
+            width: int, height: int, wait_ms: int, steps: list[dict] | None = None,
+            login_info: tuple[str, str, str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     profile = ROOT / ".cache" / f"edge-shot-{port}"
     proc = subprocess.Popen(
@@ -151,6 +194,11 @@ def capture(browser: str, port: int, pages: list[tuple[str, str]], out_dir: Path
         sess.send("Emulation.setDeviceMetricsOverride",
                   {"width": width, "height": height, "deviceScaleFactor": 1, "mobile": False})
 
+        if login_info:
+            base = pages[0][1]
+            base = re.sub(r"^(https?://[^/]+).*$", r"\1", base)
+            login(sess, base, login_info[0], login_info[1])
+
         def shoot(name: str) -> None:
             nonlocal shots
             shot = sess.send("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": False})
@@ -173,6 +221,8 @@ def capture(browser: str, port: int, pages: list[tuple[str, str]], out_dir: Path
                     time.sleep(float(step["wait"]) / 1000)
                 elif "eval" in step:
                     sess.evaluate(step["eval"])
+                elif "file" in step:
+                    sess.set_file_input(step["file"]["selector"], step["file"]["path"])
                 elif "shot" in step:
                     shoot(step["shot"])
         sess.close()
@@ -195,6 +245,7 @@ def main() -> int:
     ap.add_argument("--js", help="JSON 步骤数组：{\"eval\":expr}/{\"wait\":ms}/{\"shot\":name}")
     ap.add_argument("--js-file", help="同上，但从文件读（Windows 下命令行传引号会被吞）")
     ap.add_argument("--wait-ms", type=int, default=3500, help="每页等待渲染的时间")
+    ap.add_argument("--login", help="账号:密码；后端启用认证时必填，否则截到的是登录页")
     args = ap.parse_args()
 
     pages = [("page", args.url)] if args.url else DEFAULT_PAGES
@@ -205,8 +256,13 @@ def main() -> int:
         steps = json.loads(Path(args.js_file).read_text(encoding="utf-8"))
     elif args.js:
         steps = json.loads(args.js)
+    login_info = None
+    if args.login:
+        user, _, pwd = args.login.partition(":")
+        login_info = (user, pwd)
     print(f"浏览器：{browser}\n输出：{out_dir}")
-    ok = capture(browser, args.port, pages, out_dir, args.width, args.height, args.wait_ms, steps)
+    ok = capture(browser, args.port, pages, out_dir, args.width, args.height, args.wait_ms,
+                 steps, login_info)
     unit = "张截图" if steps else "页截图"
     total = len(steps and [s for s in steps if "shot" in s]) or len(pages)
     print(f"\n{ok}/{total} {unit}成功")
