@@ -33,6 +33,19 @@ fi
 
 # ---------- 1. Docker ----------
 say "1/6 安装 Docker"
+
+# 小内存机器（2G）加载向量模型容易 OOM，先补一块交换分区做保险
+MEM_MB=$(awk '/MemTotal/ {printf "%d", $2/1024}' /proc/meminfo)
+if [[ "$MEM_MB" -lt 3500 ]] && ! swapon --show | grep -q '/swapfile'; then
+  say "内存 ${MEM_MB}MB，创建 2G 交换分区"
+  fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+  chmod 600 /swapfile
+  mkswap /swapfile >/dev/null
+  swapon /swapfile
+  grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  echo "已启用 2G swap"
+fi
+
 if ! command -v docker >/dev/null 2>&1; then
   apt-get update -qq
   apt-get install -y -qq ca-certificates curl git
