@@ -62,16 +62,29 @@ if [[ -d "$APP_DIR/.git" ]]; then
   git -C "$APP_DIR" pull --ff-only || warn "拉取失败，沿用现有代码"
 else
   rm -rf "$APP_DIR"
-  if [[ -n "$GIT_PROXY" ]]; then
-    git clone --depth 1 "${GIT_PROXY}${REPO_URL}" "$APP_DIR"
-  else
-    git clone --depth 1 "$REPO_URL" "$APP_DIR" || {
-      warn "直连克隆失败，尝试镜像"
-      git clone --depth 1 "https://ghproxy.net/${REPO_URL}" "$APP_DIR"
-    }
+  # 国内服务器直连 GitHub 常报 "GnuTLS recv error (-110): TLS connection was
+  # non-properly terminated"，必须准备镜像回退，否则整个部署第一步就死。
+  CLONED=0
+  for MIRROR in "" "https://ghproxy.net/" "https://gh-proxy.com/" "https://ghfast.top/"; do
+    URL="${MIRROR}${REPO_URL}"
+    echo "尝试克隆：${URL}"
+    if git clone --depth 1 "$URL" "$APP_DIR" 2>/dev/null; then
+      echo "克隆成功（镜像：${MIRROR:-直连}）"
+      CLONED=1
+      break
+    fi
+    rm -rf "$APP_DIR"
+  done
+  if [[ "$CLONED" -eq 0 ]]; then
+    warn "所有镜像都失败。请在浏览器打开仓库，用「Code → Download ZIP」下载后上传到 /opt/evidence-src.zip，再运行："
+    warn "  cd /opt && unzip -q evidence-src.zip -d evidence && cd evidence && bash scripts/deploy_ubuntu_native.sh"
+    exit 1
   fi
 fi
 cd "$APP_DIR"
+
+# npm 也走国内镜像，否则前端安装会长时间卡住
+npm config set registry https://registry.npmmirror.com 2>/dev/null || true
 
 # ---------- 5. 后端 ----------
 say "5/7 安装后端依赖并配置"
