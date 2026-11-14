@@ -148,16 +148,23 @@ node -e "const fs=require('fs');const f='package.json';const p=JSON.parse(fs.rea
 
 INSTALLED=0
 if [[ -f pnpm-lock.yaml ]] && command -v pnpm >/dev/null 2>&1; then
-  pnpm install --frozen-lockfile && INSTALLED=1 || true
-  if [[ "$INSTALLED" -eq 0 ]]; then
-    warn "pnpm install（frozen）失败，改用非 frozen"
-    pnpm install && INSTALLED=1 || true
+  # 上一轮失败可能留下半截 node_modules（pnpm 的 .pnpm 符号链接结构），
+  # 直接在上面跑 npm 会崩：Cannot read properties of null (reading 'isDescendantOf')
+  rm -rf node_modules .next
+
+  # --ignore-scripts 绕开 pnpm 10 的构建脚本门禁，安装最稳；
+  # sharp 只用于 Next 的图片优化，本项目页面不依赖它，装不上也能跑。
+  pnpm install --ignore-scripts && INSTALLED=1 || warn "pnpm install --ignore-scripts 失败"
+  if [[ "$INSTALLED" -eq 1 ]]; then
+    pnpm rebuild sharp >/dev/null 2>&1 || warn "sharp 未重建（不影响本项目，忽略）"
   fi
   if [[ "$INSTALLED" -eq 0 ]]; then
-    warn "pnpm 仍失败，退回 npm 安装（npm 默认允许构建脚本）"
+    warn "退回 npm 安装"
+    rm -rf node_modules .next
     npm install --no-audit --no-fund --registry=https://registry.npmmirror.com && INSTALLED=1 || true
   fi
 else
+  rm -rf node_modules .next
   npm install --no-audit --no-fund --registry=https://registry.npmmirror.com && INSTALLED=1 || true
 fi
 
