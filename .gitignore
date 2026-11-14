@@ -46,3 +46,4 @@ docs/voiceover/dub*.srt
 
 # 提交材料副本（放仓库里，评审可免登录下载）
 !docs/release/
+docs/release/evidence-corpus.tar.gz
