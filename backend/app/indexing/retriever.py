@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import os
 import re
 from functools import lru_cache
 
@@ -28,6 +29,13 @@ RRF_K = 60
 # 交叉编码器只需要读关键片段，截断到 400 字后精度几乎不变、耗时降到 1/4。
 RERANK_MAX_CHARS = 600
 RERANK_POOL = 12
+
+# 重排模型有数百 MB，首次查询时才去下载。部署到带宽很窄的机器（实测 2Mbps
+# 云主机到 HuggingFace 镜像只有 30KB/s）时，第一个问题会卡住十几分钟甚至更久，
+# 表现为 /api/ask 超时。此时可设 EVIDENCE_RERANK=0 退回 RRF 融合排序：
+# 召回质量略降，但响应从"卡死"变成 1–2 秒。默认保持开启。
+RERANK_ENABLED = os.environ.get("EVIDENCE_RERANK", "1").strip().lower() not in ("0", "false", "no", "off")
+
 _EN_TOKEN = re.compile(r"[a-z0-9]+(?:[-_.][a-z0-9]+)*")
 _CJK = re.compile(r"[\u4e00-\u9fff]")
 
@@ -127,9 +135,13 @@ class HybridRetriever:
         query: str,
         top_k: int = 6,
         candidates: int = 30,
-        rerank: bool = True,
+        rerank: bool | None = None,
         paper_filter: set[str] | None = None,
     ) -> list[dict]:
+        # rerank=None 表示跟随环境变量（默认开启）。带宽受限的部署可设
+        # EVIDENCE_RERANK=0 跳过重排，避免首个查询卡在模型下载上。
+        if rerank is None:
+            rerank = RERANK_ENABLED
         # 中文提问先做术语扩展，否则英文库检索几乎必然失效
         expanded = self.expander.expand(query)
         lexical_query = expanded

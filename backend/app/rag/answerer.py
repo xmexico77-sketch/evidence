@@ -132,6 +132,8 @@ class GroundedAnswerer:
 
         # 相关性闸门：先判断"有没有内容能回答这个问题"，再谈标注。
         # 没有这道门，模型会把一段无关原文配上合法锚点，看起来"有据"却答非所问。
+        # 注意：重排关闭时 score 是 RRF 融合分（恒为正的倒数排名和），这道闸门
+        # 会退化为恒通过，此时只靠模型自身的 INSUFFICIENT 判定兜底。
         confidence = max(float(h.get("score") or 0.0) for h in hits)
         if confidence < MIN_CONFIDENCE:
             return AnswerResult(
