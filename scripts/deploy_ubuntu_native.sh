@@ -140,13 +140,32 @@ REVIEWER_PWD="$(grep -oP 'EVIDENCE_USERS=reviewer:\K[^,]+' .env || echo '见 .en
 say "6/7 构建前端（2G 内存下约 5–10 分钟）"
 cd "$APP_DIR/web"
 export NODE_OPTIONS="--max-old-space-size=1024"
+
+# 不管仓库里的 package.json 是不是最新，都就地写入 onlyBuiltDependencies。
+# 这样即使 git pull 因网络失败、代码是旧版，也不会再被
+# ERR_PNPM_IGNORED_BUILDS（sharp）拦死。
+node -e "const fs=require('fs');const f='package.json';const p=JSON.parse(fs.readFileSync(f,'utf8'));p.pnpm=Object.assign({},p.pnpm,{onlyBuiltDependencies:['sharp']});fs.writeFileSync(f,JSON.stringify(p,null,2));console.log('已写入 pnpm.onlyBuiltDependencies=sharp')"
+
+INSTALLED=0
 if [[ -f pnpm-lock.yaml ]] && command -v pnpm >/dev/null 2>&1; then
-  pnpm install --frozen-lockfile || pnpm install
-  pnpm build
+  pnpm install --frozen-lockfile && INSTALLED=1 || true
+  if [[ "$INSTALLED" -eq 0 ]]; then
+    warn "pnpm install（frozen）失败，改用非 frozen"
+    pnpm install && INSTALLED=1 || true
+  fi
+  if [[ "$INSTALLED" -eq 0 ]]; then
+    warn "pnpm 仍失败，退回 npm 安装（npm 默认允许构建脚本）"
+    npm install --no-audit --no-fund --registry=https://registry.npmmirror.com && INSTALLED=1 || true
+  fi
 else
-  npm install --no-audit --no-fund
-  npm run build
+  npm install --no-audit --no-fund --registry=https://registry.npmmirror.com && INSTALLED=1 || true
 fi
+
+if [[ "$INSTALLED" -eq 0 ]]; then
+  warn "前端依赖安装失败，见上方日志"
+  exit 1
+fi
+pnpm build 2>/dev/null || npm run build
 cd "$APP_DIR"
 
 # ---------- 7. systemd ----------
