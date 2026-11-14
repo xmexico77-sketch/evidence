@@ -236,11 +236,33 @@ systemctl enable --now evidence-web
 sleep 3
 
 # ---------- 语料 ----------
-say "下载语料并建索引（首次 3–6 分钟）"
-if [[ -f data/index/evidence.db ]]; then
-  echo "索引已存在，跳过"
+say "下载语料并建索引（首次 3–20 分钟，视网络）"
+CHUNKS_NOW="$(curl -fsS --max-time 5 http://127.0.0.1:8000/api/health 2>/dev/null | grep -o '"chunks":[0-9]*' | cut -d: -f2)"
+if [[ "${CHUNKS_NOW:-0}" -gt 0 ]]; then
+  echo "索引已有 ${CHUNKS_NOW} 个片段，跳过"
 else
-  ./.venv/bin/python scripts/fetch_corpus.py || warn "语料下载失败，可手动放 PDF 到 data/pdf 后重建"
+  PDF_COUNT="$(ls data/pdf/*.pdf 2>/dev/null | wc -l)"
+  if [[ "${PDF_COUNT:-0}" -lt 5 ]]; then
+    say "本地 PDF 只有 ${PDF_COUNT} 篇，尝试下载语料"
+    ./.venv/bin/python scripts/fetch_corpus.py || true
+
+    PDF_COUNT="$(ls data/pdf/*.pdf 2>/dev/null | wc -l)"
+    if [[ "${PDF_COUNT:-0}" -lt 5 ]]; then
+      # 实测 fetch_corpus 在部分网络下会卡住；直接用 wget 续传下载，
+      # -c 断点续传 + --tries 重试，避免 curl 把不完整响应当成功保存。
+      warn "fetch_corpus 未取得足够 PDF，改用 wget 直接下载（-c 续传）"
+      ARXIV_IDS="1301.3781 1409.0473 1409.3215 1412.6980 1506.02640 1512.03385 1607.06450 1608.06993 1706.03762v1 1706.03762v7 1802.05365 1810.04805 1907.11692 1910.10683 2001.04451 2004.05150 2005.14165 2010.11929 2103.00020 2106.01345 2106.09685 2205.14135"
+      for ID in $ARXIV_IDS; do
+        [[ -s "data/pdf/${ID}.pdf" ]] && continue
+        wget -c -q --tries=15 --timeout=30 --waitretry=2 -O "data/pdf/${ID}.pdf" "https://export.arxiv.org/pdf/${ID}" \
+          || wget -c -q --tries=15 --timeout=30 -O "data/pdf/${ID}.pdf" "https://arxiv.org/pdf/${ID}" \
+          || warn "${ID} 下载失败"
+      done
+    fi
+  else
+    echo "本地已有 ${PDF_COUNT} 篇 PDF，跳过下载"
+  fi
+
   ./.venv/bin/python scripts/index_cli.py build "data/pdf/*.pdf" || warn "建索引失败，见日志"
 fi
 
