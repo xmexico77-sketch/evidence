@@ -141,6 +141,11 @@ say "6/7 构建前端（2G 内存下约 5–10 分钟）"
 cd "$APP_DIR/web"
 export NODE_OPTIONS="--max-old-space-size=1024"
 
+# 幂等：已经装好且构建过就跳过。部署中断后重跑时，不必再花 5–10 分钟重装重构建。
+if [[ -d node_modules && -f .next/BUILD_ID ]]; then
+  say "前端已安装并构建过，跳过（删除 .next 可强制重建）"
+else
+
 # 不管仓库里的 package.json 是不是最新，都就地写入 onlyBuiltDependencies。
 # 这样即使 git pull 因网络失败、代码是旧版，也不会再被
 # ERR_PNPM_IGNORED_BUILDS（sharp）拦死。
@@ -152,7 +157,8 @@ if [[ -f pnpm-lock.yaml ]] && command -v pnpm >/dev/null 2>&1; then
   # 直接在上面跑 npm 会崩：Cannot read properties of null (reading 'isDescendantOf')
   rm -rf node_modules .next
 
-  # --ignore-scripts 绕开 pnpm 10 的构建脚本门禁，安装最稳；
+  # --ignore-scripts 绕开 pnpm 的构建脚本门禁（pnpm v12 已不读 package.json 的
+  # pnpm.onlyBuiltDependencies 字段，实测照样报 ERR_PNPM_IGNORED_BUILDS）。
   # sharp 只用于 Next 的图片优化，本项目页面不依赖它，装不上也能跑。
   pnpm install --ignore-scripts && INSTALLED=1 || warn "pnpm install --ignore-scripts 失败"
   if [[ "$INSTALLED" -eq 1 ]]; then
@@ -173,6 +179,7 @@ if [[ "$INSTALLED" -eq 0 ]]; then
   exit 1
 fi
 pnpm build 2>/dev/null || npm run build
+fi
 cd "$APP_DIR"
 
 # ---------- 7. systemd ----------
