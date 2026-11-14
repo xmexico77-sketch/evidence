@@ -110,6 +110,12 @@ else
 fi
 cd "$APP_DIR"
 
+# 服务以非 root 的 ubuntu 运行，缩小被攻破后的影响面
+# （2026-11-14 那次 React2Shell 打穿后拿到的就是 root，教训）
+if id ubuntu >/dev/null 2>&1; then
+  chown -R ubuntu:ubuntu "$APP_DIR" 2>/dev/null || true
+fi
+
 # npm 也走国内镜像，否则前端安装会长时间卡住
 npm config set registry https://registry.npmmirror.com 2>/dev/null || true
 
@@ -191,6 +197,8 @@ After=network.target
 
 [Service]
 Type=simple
+User=ubuntu
+Group=ubuntu
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${APP_DIR}/.env
 ExecStart=${APP_DIR}/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir ${APP_DIR}/backend
@@ -209,6 +217,8 @@ Requires=evidence-api.service
 
 [Service]
 Type=simple
+User=ubuntu
+Group=ubuntu
 WorkingDirectory=${APP_DIR}/web
 Environment=NODE_ENV=production
 Environment=API_BASE=http://127.0.0.1:8000
