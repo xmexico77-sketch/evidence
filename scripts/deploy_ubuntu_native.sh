@@ -251,12 +251,12 @@ CHUNKS_NOW="$(curl -fsS --max-time 5 http://127.0.0.1:8000/api/health 2>/dev/nul
 if [[ "${CHUNKS_NOW:-0}" -gt 0 ]]; then
   echo "索引已有 ${CHUNKS_NOW} 个片段，跳过"
 else
-  PDF_COUNT="$(ls data/pdf/*.pdf 2>/dev/null | wc -l)"
+  PDF_COUNT="$(find data/pdf -name '*.pdf' 2>/dev/null | wc -l)"
   if [[ "${PDF_COUNT:-0}" -lt 5 ]]; then
     say "本地 PDF 只有 ${PDF_COUNT} 篇，尝试下载语料"
     ./.venv/bin/python scripts/fetch_corpus.py || true
 
-    PDF_COUNT="$(ls data/pdf/*.pdf 2>/dev/null | wc -l)"
+    PDF_COUNT="$(find data/pdf -name '*.pdf' 2>/dev/null | wc -l)"
     if [[ "${PDF_COUNT:-0}" -lt 5 ]]; then
       # 实测 fetch_corpus 在部分网络下会卡住；直接用 wget 续传下载，
       # -c 断点续传 + --tries 重试，避免 curl 把不完整响应当成功保存。
