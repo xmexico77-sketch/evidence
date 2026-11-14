@@ -58,26 +58,53 @@ command -v pnpm >/dev/null 2>&1 || npm install -g pnpm >/dev/null 2>&1 || warn "
 
 # ---------- 4. 代码 ----------
 say "4/7 获取代码"
+
+# 小包/弱网下 git 的 HTTP/2 容易断（实测 curl 92 INTERNAL_ERROR、early EOF），
+# 全局压回 HTTP/1.1 并加大缓冲，能显著降低断流概率
+git config --global http.version HTTP/1.1 2>/dev/null || true
+git config --global http.postBuffer 524288000 2>/dev/null || true
+
+TARBALL_URL="${REPO_URL%.git}/archive/refs/heads/main.tar.gz"
+
 if [[ -d "$APP_DIR/.git" ]]; then
   git -C "$APP_DIR" pull --ff-only || warn "拉取失败，沿用现有代码"
+elif [[ -f "$APP_DIR/docker-compose.yml" ]]; then
+  say "已有源码目录，跳过下载"
 else
   rm -rf "$APP_DIR"
-  # 国内服务器直连 GitHub 常报 "GnuTLS recv error (-110): TLS connection was
-  # non-properly terminated"，必须准备镜像回退，否则整个部署第一步就死。
-  CLONED=0
-  for MIRROR in "" "https://ghproxy.net/" "https://gh-proxy.com/" "https://ghfast.top/"; do
-    URL="${MIRROR}${REPO_URL}"
-    echo "尝试克隆：${URL}"
-    if git clone --depth 1 "$URL" "$APP_DIR" 2>/dev/null; then
-      echo "克隆成功（镜像：${MIRROR:-直连}）"
-      CLONED=1
-      break
+  OK=0
+
+  # 先试 git 克隆（镜像优先）
+  for MIRROR in "https://ghproxy.net/" "https://gh-proxy.com/" "https://ghfast.top/" ""; do
+    echo "尝试 git 克隆：${MIRROR}${REPO_URL}"
+    if git clone --depth 1 --single-branch "${MIRROR}${REPO_URL}" "$APP_DIR" 2>/dev/null; then
+      OK=1; break
     fi
     rm -rf "$APP_DIR"
   done
-  if [[ "$CLONED" -eq 0 ]]; then
-    warn "所有镜像都失败。请在浏览器打开仓库，用「Code → Download ZIP」下载后上传到 /opt/evidence-src.zip，再运行："
-    warn "  cd /opt && unzip -q evidence-src.zip -d evidence && cd evidence && bash scripts/deploy_ubuntu_native.sh"
+
+  # git 不通就退回整包下载：单次 HTTP 请求，比 git 的 pack 传输稳得多
+  if [[ "$OK" -eq 0 ]]; then
+    warn "git 克隆全部失败，改用 tarball 整包下载"
+    for MIRROR in "https://ghproxy.net/" "https://gh-proxy.com/" "https://ghfast.top/" ""; do
+      URL="${MIRROR}${TARBALL_URL}"
+      echo "尝试下载：${URL}"
+      if curl -fL --http1.1 --retry 3 --retry-delay 2 --connect-timeout 20 -o /tmp/evidence-src.tar.gz "$URL"; then
+        mkdir -p "$APP_DIR"
+        if tar xzf /tmp/evidence-src.tar.gz -C "$APP_DIR" --strip-components=1; then
+          echo "tarball 解包成功（镜像：${MIRROR:-直连}）"
+          OK=1; break
+        fi
+      fi
+      rm -rf "$APP_DIR"
+    done
+  fi
+
+  if [[ "$OK" -eq 0 ]]; then
+    warn "自动获取均失败。请在能上网的电脑打开仓库，Code → Download ZIP，"
+    warn "把 zip 上传到服务器 /tmp/evidence.zip，然后执行："
+    warn "  sudo apt-get install -y unzip && sudo mkdir -p $APP_DIR && sudo unzip -q /tmp/evidence.zip -d /tmp/ev && sudo cp -r /tmp/ev/*/* $APP_DIR"
+    warn "  cd $APP_DIR && sudo bash scripts/deploy_ubuntu_native.sh"
     exit 1
   fi
 fi
