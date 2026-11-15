@@ -88,6 +88,11 @@ CHECKS = [
         "requires": "web",
     },
     {
+        "name": "Agent 层（意图路由/计划/自检/事件流）",
+        "script": "test_agent.py",
+        "heavy": False,
+        "covers": "交付",
+    },    {
         "name": "登录失败限速（爆破防护/封禁/互不牵连）",
         "script": "test_ratelimit.py",
         "heavy": False,

@@ -63,6 +63,9 @@ jobs:
       - name: 抗幻觉 Guardrails
         run: python scripts/test_antihallucination.py
 
+      - name: Agent 层（路由/计划/自检/事件流）
+        run: python scripts/test_agent.py
+
   frontend:
     name: 前端构建
     runs-on: ubuntu-latest
