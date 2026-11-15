@@ -1,0 +1,16 @@
+[
+  { "wait": 2500 },
+  {
+    "eval": "(()=>{const s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;const el=document.querySelector('input[type=text]');if(!el)return 'NO INPUT';s.call(el,'GPT-3 有多少参数？');el.dispatchEvent(new Event('input',{bubbles:true}));return el.value})()"
+  },
+  { "wait": 400 },
+  {
+    "eval": "(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.trim()==='提问');if(!b)return 'NO BTN';b.click();return 'clicked'})()"
+  },
+  { "wait": 16000 },
+  {
+    "eval": "(()=>{const d=document.querySelector('details.trace');if(!d)return 'NO TRACE';d.open=true;d.scrollIntoView({block:'center'});return 'opened'})()"
+  },
+  { "wait": 1200 },
+  { "shot": "02b-agent-trace" }
+]
