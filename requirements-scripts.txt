@@ -11,3 +11,6 @@ pillow==12.3.0
 # 脚本工具
 psutil==7.2.2
 websockets==17.3
+
+# 演示视频配音（scripts/make_voiceover.py，edge-tts 合成普通话旁白）
+edge-tts==7.2.3

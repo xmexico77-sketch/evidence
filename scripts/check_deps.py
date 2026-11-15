@@ -107,6 +107,11 @@ def main() -> int:
 
     # 本地包名，不算外部依赖
     local = {"app", "scripts", "tests"}
+    # scripts/ 下的单文件模块同样算本地（例如 scripts/ui_shot.py 被
+    # probe_input.py 直接 import，它不是 PyPI 包）
+    if (ROOT / "scripts").is_dir():
+        for py in (ROOT / "scripts").glob("*.py"):
+            local.add(py.stem)
 
     backend_uses: dict[str, set[str]] = {}
     script_uses: dict[str, set[str]] = {}

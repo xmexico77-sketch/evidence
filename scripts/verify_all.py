@@ -120,12 +120,16 @@ CHECKS = [
 ]
 
 
-def service_state() -> dict[str, bool]:
+def service_state(api_base: str = "http://127.0.0.1:8000",
+                  web_base: str = "http://127.0.0.1:3001") -> dict[str, bool]:
     """预检后端与前端是否在跑。
 
     为什么需要：服务没起时，相关检查会以"失败"出现在报告里，
     看上去像代码坏了——本会话实测过两次，两次都是环境问题。
     验收报告必须能区分"代码错"和"没起服务"。
+
+    地址可覆盖，便于对着云主机部署验收：
+      verify_all.py --api http://1.12.228.44:3000/api --web http://1.12.228.44:3000
     """
     import urllib.error
     import urllib.request
@@ -138,17 +142,19 @@ def service_state() -> dict[str, bool]:
             return False
 
     return {
-        "api": alive("http://127.0.0.1:8000/api/health"),
-        "web": alive("http://127.0.0.1:3001"),
+        "api": alive(f"{api_base.rstrip('/')}/api/health"),
+        "web": alive(web_base),
     }
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true", help="跳过需要加载向量模型的检查")
+    ap.add_argument("--api", default="http://127.0.0.1:8000", help="后端根地址（云上填 http://IP:3000）")
+    ap.add_argument("--web", default="http://127.0.0.1:3001", help="前端根地址")
     args = ap.parse_args()
 
-    services = service_state()
+    services = service_state(args.api, args.web)
     if not all(services.values()):
         down = [k for k, v in services.items() if not v]
         print(f"[预检] 未运行：{', '.join(down)}")

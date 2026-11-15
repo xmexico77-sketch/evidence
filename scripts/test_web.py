@@ -3,14 +3,16 @@
 没有浏览器也能验证的东西先验证掉：路由是否 200、SSR 输出里是否有统一导航、
 各页是否还残留旧的"← 返回工作台"。
 
-用法：.venv\\Scripts\\python.exe scripts\\test_web.py
+用法：
+  .venv\\Scripts\\python.exe scripts\\test_web.py                    # 默认本机 3001
+  .venv\\Scripts\\python.exe scripts\\test_web.py http://IP:3000      # 对着部署验收
 """
 from __future__ import annotations
 
 import sys
 import urllib.request
 
-WEB = "http://127.0.0.1:3001"
+WEB = sys.argv[1].rstrip("/") if len(sys.argv) > 1 else "http://127.0.0.1:3001"
 
 PAGES = {
     # 只放「不依赖客户端数据」的文案：依赖 payload 的区块在 SSR 阶段不存在，
