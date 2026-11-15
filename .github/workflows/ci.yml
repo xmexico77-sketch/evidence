@@ -1,0 +1,134 @@
+name: CI
+
+# 为什么要有 CI：这个项目有 8 项自动验收（依赖声明、文档一致性、部署静态检查、
+# 服务层接口、登录限速、前端构建……），此前全靠手动跑。11-14 那次被
+# React2Shell（CVE-2025-55182）打穿，就是因为"依赖升级"没有强制检查环节。
+# 现在每次 push 自动跑，改坏了当场红。
+#
+# 不在 CI 里跑的检查（以及原因）：
+#   * check_deploy.py —— 需要已部署的服务 + 评审账号密码（手动跑，见提交清单）
+#   * test_api.py / verify_graph.py 等 —— 需要 LLM Key 与本地索引（手动跑）
+#   * test_web.py —— 需要跑起前端且依赖索引数据
+# 这些仍由 docs/提交清单.md 的「提交前 5 分钟自检」覆盖。
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # 每周一 09:00 (UTC+8) 跑一次，及早发现依赖层面的漂移
+    - cron: "0 1 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 后端静态检查与单元测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            requirements-scripts.txt
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt -r requirements-scripts.txt
+
+      - name: 语法编译（全量）
+        run: python -m compileall -q backend scripts
+
+      - name: 依赖声明完整性
+        run: python scripts/check_deps.py
+
+      - name: 文档一致性
+        run: python scripts/check_docs.py
+
+      - name: 部署静态检查（Dockerfile / compose / 环境变量）
+        run: python scripts/check_deploy_static.py
+
+      - name: 登录失败限速
+        run: python scripts/test_ratelimit.py
+
+      - name: 抗幻觉 Guardrails
+        run: python scripts/test_antihallucination.py
+
+  frontend:
+    name: 前端构建
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 安装 pnpm
+        run: npm install -g pnpm@9
+
+      - name: 安装依赖（跳过生命周期脚本）
+        working-directory: web
+        # --ignore-scripts：pnpm 10+ 默认拦依赖的构建脚本（sharp 之类）会直接报错，
+        # 本项目不用 next/image，跳过不影响构建。
+        run: pnpm install --ignore-scripts
+
+      - name: 生产构建
+        working-directory: web
+        env:
+          NODE_OPTIONS: --max-old-space-size=2048
+        run: pnpm build
+
+      - name: 关键路由产物存在
+        working-directory: web
+        run: |
+          test -f .next/BUILD_ID || (echo "缺少 .next/BUILD_ID"; exit 1)
+          test -f .next/server/app/page.js || (echo "缺少首页产物"; exit 1)
+
+  # 安全门禁：核心依赖不得低于修复 React2Shell 的版本
+  security:
+    name: 安全基线（CVE-2025-55182）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 检查 Next.js / React 版本
+        run: |
+          python3 - <<'PY'
+          import json, sys, pathlib
+          p = json.loads(pathlib.Path("web/package.json").read_text(encoding="utf-8"))
+          deps = p.get("dependencies", {})
+          nxt, react = deps.get("next", ""), deps.get("react", "")
+          print(f"next={nxt} react={react}")
+
+          def ver(s):
+              return tuple(int(x) for x in s.lstrip("^~").split(".")[:3] if x.isdigit())
+
+          def patched(v):
+              # 官方修复版本：15.5.7 / 16.0.7（同线更早的分支另有补丁）
+              major, minor, patch = v
+              if major >= 17:
+                  return True
+              if major == 16:
+                  return (minor, patch) >= (0, 7)
+              if major == 15:
+                  return minor == 5 and patch >= 7
+              return False
+
+          if not patched(ver(nxt)):
+              print(f"::error::Next.js {nxt} 低于修复 React2Shell 的版本（15.5.7）", file=sys.stderr)
+              sys.exit(1)
+          if ver(react) < (19, 1, 10):
+              print(f"::error::React {react} 低于 19.1.10", file=sys.stderr)
+              sys.exit(1)
+          print("安全基线通过")
+          PY

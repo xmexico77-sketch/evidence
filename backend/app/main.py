@@ -31,6 +31,7 @@ from .auth import (
     verify_token,
 )
 
+from . import ratelimit
 from .config import DATA_DIR, INDEX_DIR, PDF_DIR
 from .discovery import fetch as fetch_arxiv
 from .discovery.recommend import ingest as ingest_discovery
@@ -150,9 +151,31 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/api/login")
-def login(req: LoginRequest) -> JSONResponse:
+def login(req: LoginRequest, request: Request) -> JSONResponse:
+    # 失败限速：演示账号密码是公开的，必须假设有人在刷。
+    # 账号维度与来源维度两条闸门，任一命中即 429（带 Retry-After）。
+    ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+          or request.headers.get("x-real-ip", "")
+          or (request.client.host if request.client else "unknown"))
+    allowed, wait = ratelimit.check(ip, req.username)
+    if not allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"登录失败次数过多，请 {wait} 秒后再试",
+            headers={"Retry-After": str(wait)},
+        )
+
     if not check_password(req.username, req.password):
+        blocked_for = ratelimit.fail(ip, req.username)
+        if blocked_for:
+            raise HTTPException(
+                status_code=429,
+                detail=f"登录失败次数过多，请 {blocked_for} 秒后再试",
+                headers={"Retry-After": str(blocked_for)},
+            )
         raise HTTPException(401, "账号或密码错误")
+
+    ratelimit.succeed(ip, req.username)
     token = create_token(req.username)
     payload = JSONResponse({"ok": True, "user": req.username, "token": token})
     payload.set_cookie(

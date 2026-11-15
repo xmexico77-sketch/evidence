@@ -88,6 +88,12 @@ CHECKS = [
         "requires": "web",
     },
     {
+        "name": "登录失败限速（爆破防护/封禁/互不牵连）",
+        "script": "test_ratelimit.py",
+        "heavy": False,
+        "covers": "交付",
+    },
+    {
         "name": "版式泛化（5 篇未见论文的解析鲁棒性）",
         "script": "test_layouts.py",
         "heavy": True,
@@ -171,8 +177,13 @@ def main() -> int:
             rows.append((check["covers"], check["name"], "SKIP", 0.0))
             continue
         started = time.time()
+        # 前端冒烟脚本接受 base url 参数，对着部署验收时要传进去；
+        # 其余脚本是本地代码级测试（TestClient），不需要地址。
+        cmd = [str(PY), str(SCRIPTS / check["script"])]
+        if check["script"] == "test_web.py":
+            cmd.append(args.web)
         proc = subprocess.run(
-            [str(PY), str(SCRIPTS / check["script"])],
+            cmd,
             capture_output=True,
             text=True,
             encoding="utf-8",
