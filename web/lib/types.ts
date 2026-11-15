@@ -153,3 +153,36 @@ export type AskResponse = {
 
 /** 阅读器里的「就本篇提问」复用同一个返回结构。 */
 export type AnswerResult = AskResponse;
+
+/** Agent 事件流（/api/ask/stream）的单帧。type 决定其余字段含义。 */
+export type AgentEvent = {
+  type: string;
+  // route
+  intent?: string;
+  method?: string;
+  reason?: string;
+  confidence?: number;
+  // plan
+  steps?: AgentStep[];
+  // step
+  id?: string;
+  label?: string;
+  ok?: boolean;
+  elapsed_ms?: number;
+  observation?: string;
+  // answer
+  delta?: string;
+  // citations
+  grounded?: boolean;
+  insufficient?: boolean;
+  repaired?: boolean;
+  invalid_markers?: number[];
+  citations?: Citation[];
+  // critic
+  issues?: string[];
+  checks?: Record<string, unknown>;
+  // error
+  message?: string;
+};
+
+export type AgentStep = { id: string; label: string; detail?: string };

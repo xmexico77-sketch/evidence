@@ -118,11 +118,16 @@ class GroundedAnswerer:
         question: str,
         top_k: int = 5,
         paper_filter: set[str] | None = None,
+        hits: list[dict] | None = None,
     ) -> AnswerResult:
         # paper_filter 让用户把问题限定在某篇论文内。
         # 库大了之后"训练用了多少块 GPU"这类问题会有多个合理答案，
         # 不限定范围就会答成另一篇论文的数值——技术上不错，但不是用户问的。
-        hits = self.retriever.search(question, top_k=top_k, paper_filter=paper_filter)
+        #
+        # hits 允许调用方（Agent 层）先自己检索、把结果传进来：
+        # 这样检索只发生一次，Agent 的"检索"步骤才能如实报告命中了什么。
+        if hits is None:
+            hits = self.retriever.search(question, top_k=top_k, paper_filter=paper_filter)
         if not hits:
             return AnswerResult(
                 question=question,

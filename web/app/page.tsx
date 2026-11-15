@@ -89,6 +89,18 @@ const CAPABILITIES = [
   { tag: "模块三", title: "双语联动", desc: "原文与译文共享段落锚点，滚动对齐", href: "/paper/1706.03762v1" },
 ];
 
+const INTENT_LABELS: Record<string, string> = {
+  paper_qa: "单篇问答",
+  library_qa: "整库问答",
+  compare: "跨篇对比",
+  discover: "文献发现",
+  review: "综述脉络",
+};
+
+function intentLabel(intent: string): string {
+  return INTENT_LABELS[intent] ?? intent;
+}
+
 export default function Workbench() {
   const [health, setHealth] = useState<Health | null>(null);
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -105,6 +117,14 @@ export default function Workbench() {
   const [comp, setComp] = useState<CompareResult | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Agent 轨迹（/api/ask/stream 的事件累积而成）
+  const [trace, setTrace] = useState<
+    { id: string; label: string; ok: boolean; elapsed_ms: number; observation: string }[]
+  >([]);
+  const [traceIntent, setTraceIntent] = useState("");
+  const [traceReason, setTraceReason] = useState("");
+  const [traceMs, setTraceMs] = useState(0);
+  const [critique, setCritique] = useState<{ ok: boolean; issues: string[] } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -123,10 +143,43 @@ export default function Workbench() {
     if (!q || busy) return;
     setBusy(true);
     setError(null);
+    setTrace([]);
+    setTraceIntent("");
+    setTraceReason("");
+    setTraceMs(0);
+    setCritique(null);
     try {
-      setResult(await api.ask(q, 5, scope || undefined));
+      // 优先走 Agent 事件流：能拿到意图、计划、每步耗时与自检结论
+      const res = await api.askStream(q, 5, scope || undefined, (ev) => {
+        if (ev.type === "route") {
+          setTraceIntent(String(ev.intent ?? ""));
+          setTraceReason(String(ev.reason ?? ""));
+        } else if (ev.type === "step") {
+          setTrace((prev) => [
+            ...prev,
+            {
+              id: String(ev.id ?? ""),
+              label: String(ev.label ?? ""),
+              ok: Boolean(ev.ok),
+              elapsed_ms: Number(ev.elapsed_ms ?? 0),
+              observation: String(ev.observation ?? ""),
+            },
+          ]);
+        } else if (ev.type === "critic") {
+          setCritique({ ok: Boolean(ev.ok), issues: (ev.issues as string[]) ?? [] });
+        } else if (ev.type === "done") {
+          setTraceMs(Number(ev.elapsed_ms ?? 0));
+        }
+      });
+      setResult(res);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      // 流式通道异常时回退到普通接口：宁可少给人看轨迹，也不能让演示打不开
+      try {
+        setResult(await api.ask(q, 5, scope || undefined));
+      } catch (e2) {
+        setError(e2 instanceof Error ? e2.message : String(e2));
+        void e;
+      }
     } finally {
       setBusy(false);
     }
@@ -398,6 +451,54 @@ export default function Workbench() {
                 </span>
               )}
             </div>
+
+            {/* Agent 轨迹：让人看到"怎么想的"，而不是只看到答案。
+                默认折叠，不干扰阅读；展开后是意图、计划、每步耗时与自检结论。 */}
+            {trace.length > 0 && (
+              <details className="trace">
+                <summary>
+                  <span className="pill mono">Agent 轨迹</span>
+                  <span className="faint" style={{ marginLeft: 8, fontSize: 11.5 }}>
+                    {traceIntent ? intentLabel(traceIntent) : "执行中"}
+                    {traceMs > 0 ? ` · ${traceMs} ms` : ""}
+                    {critique && !critique.ok ? " · 自检发现问题" : ""}
+                  </span>
+                </summary>
+
+                {traceIntent && (
+                  <div className="trace-block">
+                    <div className="faint mono" style={{ fontSize: 11.5 }}>
+                      意图：{intentLabel(traceIntent)}
+                      {traceReason ? `（${traceReason}）` : ""}
+                    </div>
+                  </div>
+                )}
+
+                <ol className="trace-steps">
+                  {trace.map((s) => (
+                    <li key={s.id + s.label} className={s.ok ? "" : "bad"}>
+                      <span className="mono" style={{ width: 54, display: "inline-block" }}>
+                        {s.elapsed_ms ?? 0} ms
+                      </span>
+                      <span>{s.label}</span>
+                      {s.observation && (
+                        <span className="faint" style={{ marginLeft: 6 }}>
+                          — {s.observation}
+                        </span>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+
+                {critique && (
+                  <div className="trace-block">
+                    <div className="faint mono" style={{ fontSize: 11.5 }}>
+                      自检：{critique.ok ? "通过" : critique.issues.join("；")}
+                    </div>
+                  </div>
+                )}
+              </details>
+            )}
 
             <div className="answer">{result.answer}</div>
 
