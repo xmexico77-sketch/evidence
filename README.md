@@ -2,6 +2,8 @@
 
 > 带**段落级锚点溯源**的科研助手 Agent —— 每个结论都能点回原文的页与坐标。
 
+[![CI](https://github.com/xmexico77-sketch/evidence/actions/workflows/ci.yml/badge.svg)](https://github.com/xmexico77-sketch/evidence/actions/workflows/ci.yml)
+
 参赛作品 · 第九届传智杯「AI 大模型创新应用挑战赛」· 智领科研·意图驱动
 
 ---
