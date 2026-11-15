@@ -13,11 +13,23 @@
 
 成功后立即清零，避免正常用户被历史失败拖累。
 
+**为什么来源维度要跳过本机地址**：这台机器上前端 Next.js 通过 Route Handler
+把 /api/* 转发给后端，所有外部请求到达后端时源地址都是 127.0.0.1。
+如果把本机地址也计入"来源维度"，一个人刷 20 次就会把**所有评审**一起封掉——
+本实现第一版就踩了这个坑（自己测试时把全体锁了 15 分钟）。因此：
+本机地址只参与账号维度，不参与来源维度。
+
+**取舍**：没有可信代理转发真实客户端 IP 时，来源维度实际失效，防线退化为
+"按账号封禁"。这也意味着有人可以故意刷错密码把评审账号锁住——所以
+账号维度的阈值放宽到 10 次、封禁缩短到 5 分钟，把可用性损失控制在可接受范围。
+真要做到按 IP 防护，需要反代透传 X-Forwarded-For 并在受信网络上部署。
+
 阈值可用环境变量覆盖：
-  EVIDENCE_LOGIN_MAX=5        账号维度窗口内最大失败次数
+  EVIDENCE_LOGIN_MAX=10       账号维度窗口内最大失败次数
   EVIDENCE_LOGIN_MAX_IP=20    来源维度窗口内最大失败次数
   EVIDENCE_LOGIN_WINDOW=600   窗口长度（秒）
-  EVIDENCE_LOGIN_BLOCK=900    封禁时长（秒）
+  EVIDENCE_LOGIN_BLOCK=300    账号维度封禁时长（秒）
+  EVIDENCE_LOGIN_BLOCK_IP=900 来源维度封禁时长（秒）
 """
 from __future__ import annotations
 
@@ -26,10 +38,14 @@ import threading
 import time
 from collections import deque
 
-MAX_FAILS = int(os.environ.get("EVIDENCE_LOGIN_MAX", "5"))
+MAX_FAILS = int(os.environ.get("EVIDENCE_LOGIN_MAX", "10"))
 MAX_FAILS_IP = int(os.environ.get("EVIDENCE_LOGIN_MAX_IP", "20"))
 WINDOW = int(os.environ.get("EVIDENCE_LOGIN_WINDOW", "600"))
-BLOCK = int(os.environ.get("EVIDENCE_LOGIN_BLOCK", "900"))
+BLOCK = int(os.environ.get("EVIDENCE_LOGIN_BLOCK", "300"))
+BLOCK_IP = int(os.environ.get("EVIDENCE_LOGIN_BLOCK_IP", "900"))
+
+# 这些地址说明请求来自本机代理，不是真实客户端；来源维度对它们无意义
+SHARED_PROXY_HOSTS = {"127.0.0.1", "::1", "localhost", "", "unknown"}
 
 _lock = threading.Lock()
 # key -> (失败时间戳队列, 封禁截止时间)
@@ -47,6 +63,14 @@ def _prune(key: str, now: float) -> None:
         _fails.pop(key, None)
 
 
+def _keys(ip: str, username: str) -> list[tuple[str, int, int]]:
+    """返回需要检查的 (键, 失败阈值, 封禁秒数)。本机地址不参与来源维度。"""
+    keys = [(f"u:{ip}|{username.lower()}", MAX_FAILS, BLOCK)]
+    if ip not in SHARED_PROXY_HOSTS:
+        keys.append((f"i:{ip}", MAX_FAILS_IP, BLOCK_IP))
+    return keys
+
+
 def check(ip: str, username: str) -> tuple[bool, int]:
     """返回 (是否允许, 剩余封禁秒数)。
 
@@ -54,35 +78,31 @@ def check(ip: str, username: str) -> tuple[bool, int]:
     否则攻击者可以从响应时间上探测密码是否正确。
     """
     now = time.monotonic()
-    user_key = f"u:{ip}|{username.lower()}"
-    ip_key = f"i:{ip}"
     with _lock:
-        for key in (user_key, ip_key):
+        for key, _limit, _block in _keys(ip, username):
             until = _blocked_until.get(key)
             if until and until > now:
                 return False, int(until - now) + 1
             if until and until <= now:
                 _blocked_until.pop(key, None)
-        _prune(user_key, now)
-        _prune(ip_key, now)
+        for key, _limit, _block in _keys(ip, username):
+            _prune(key, now)
         return True, 0
 
 
 def fail(ip: str, username: str) -> int:
-    """记录一次失败。返回剩余封禁秒数（0 表示还没触发封禁）。"""
+    """记录一次失败。返回封禁秒数（0 表示还没触发封禁）。"""
     now = time.monotonic()
-    user_key = f"u:{ip}|{username.lower()}"
-    ip_key = f"i:{ip}"
     triggered = 0
     with _lock:
-        for key, limit in ((user_key, MAX_FAILS), (ip_key, MAX_FAILS_IP)):
+        for key, limit, block in _keys(ip, username):
             q = _fails.setdefault(key, deque())
             q.append(now)
             _prune(key, now)
             if len(q) >= limit:
-                _blocked_until[key] = now + BLOCK
+                _blocked_until[key] = now + block
                 q.clear()
-                triggered = max(triggered, BLOCK)
+                triggered = max(triggered, block)
     return triggered
 
 

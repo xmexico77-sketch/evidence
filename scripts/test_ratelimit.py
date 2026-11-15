@@ -89,6 +89,16 @@ def main() -> int:
         codes.append(r.status_code)
     check("同 IP 换用户名刷会被封", 429 in codes, f"max_ip={ratelimit.MAX_FAILS_IP} codes={codes[-3:]}")
 
+    # 6) 本机地址（前端代理）不得触发来源维度封禁
+    #    否则一个人刷上限就会把全体评审锁死——实现第一版踩过这个坑
+    #    线上所有外部请求都以 127.0.0.1 到达后端，这里用 XFF 模拟该场景
+    ratelimit.reset_all()
+    proxy = {"x-forwarded-for": "127.0.0.1"}
+    for i in range(ratelimit.MAX_FAILS_IP + 2):
+        client.post("/api/login", json={"username": f"spray{i}", "password": "x"}, headers=proxy)
+    r = client.post("/api/login", json={"username": username, "password": password}, headers=proxy)
+    check("本机代理地址不触发 IP 维封禁（评审仍可登录）", r.status_code == 200, str(r.status_code))
+
     ok = sum(1 for c, _, _ in results if c)
     for cond, name, detail in results:
         print(f"[{'PASS' if cond else 'FAIL'}] {name}" + (f"  ({detail})" if not cond and detail else ""))
