@@ -159,6 +159,15 @@ def service_state(api_base: str = "http://127.0.0.1:8000",
 
 
 def main() -> int:
+    # 输出重定向到文件时（例如后台跑验收），Windows 默认按 GBK 编码，
+    # 一旦某个检查的失败输出里含非 GBK 字符（这次是西里尔字母）就直接崩。
+    # 统一按 UTF-8 输出，避免「验收脚本自己被输出打死」这种荒谬故障。
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--quick", action="store_true", help="跳过需要加载向量模型的检查")
     ap.add_argument("--api", default="http://127.0.0.1:8000", help="后端根地址（云上填 http://IP:3000）")
